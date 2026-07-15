@@ -1,4 +1,4 @@
-const CACHE_NAME = 'smart-doorbell-v1';
+const CACHE_NAME = 'smart-doorbell-v2';
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',

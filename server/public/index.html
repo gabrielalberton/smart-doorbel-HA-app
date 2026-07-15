@@ -42,17 +42,24 @@
     button.warn { background: #df3030; }
     select { max-width: 116px; height: 38px; border-radius: 999px; padding: 0 26px 0 10px; font-weight: 700; font-size: 12px; outline: none; }
     #status { display: none; }
-    #stream { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
-    .test-panel { width: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 0 0 4px; }
-    .test-panel button { width: auto; min-width: 86px; height: 42px; border-radius: 999px; padding: 0 12px; font-size: 12px; font-weight: 800; letter-spacing: .01em; background: #223047; }
+    .settings-modal { width: min(92vw, 390px); border: 1px solid #273449; border-radius: 22px; padding: 0; color: white; background: #0d1522; box-shadow: 0 24px 70px rgba(0,0,0,.7); }
+    .settings-modal::backdrop { background: rgba(0,0,0,.72); backdrop-filter: blur(3px); }
+    .settings-card { padding: 18px; display: grid; gap: 16px; }
+    .settings-header { display: flex; align-items: center; justify-content: space-between; }
+    .settings-header strong { font-size: 18px; }
+    .settings-close { width: 40px; height: 40px; font-size: 25px; background: #202b3b; box-shadow: none; }
+    .settings-field { display: grid; gap: 7px; color: #aebbd0; font-size: 12px; font-weight: 800; }
+    .settings-field select { width: 100%; max-width: none; height: 46px; border-radius: 12px; padding: 0 14px; font-size: 14px; }
+    .test-panel { width: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 0; }
+    .test-panel button, .settings-update { width: auto; min-width: 86px; height: 42px; border-radius: 999px; padding: 0 12px; font-size: 12px; font-weight: 800; letter-spacing: .01em; background: #223047; }
     .test-panel button.stop { background: #5f2932; }
     .test-panel button:disabled { opacity: .55; cursor: wait; }
-    .test-label { width: 100%; text-align: center; color: #94a3b8; font-size: 11px; font-weight: 700; }
+    .settings-update { width: 100%; border-radius: 12px; background: #16a34a; }
     .hidden { display: none !important; }
     body.native-call { min-height: 0; display: block; padding: 0; overflow: hidden; background: #000; }
     body.native-call #stage, body.native-call #secondaryStage { width: 100%; margin: 0 0 4px; border-radius: 0; box-shadow: none; }
     body.native-call video { width: 100%; height: auto; object-fit: contain; }
-    body.native-call .controls, body.native-call .test-panel, body.native-call #stream, body.native-call #status { display: none !important; }
+    body.native-call .controls, body.native-call .settings-modal, body.native-call #status { display: none !important; }
     @media (max-width: 520px) { body { gap: 8px; } button { width: 52px; height: 52px; font-size: 23px; } button.primary { width: 68px; height: 68px; } }
   </style>
 </head>
@@ -60,9 +67,6 @@
   <div id="stage"><video id="video" autoplay playsinline></video></div>
   <div id="secondaryStage"><video id="secondaryVideo" autoplay playsinline muted></video></div>
 
-  <select id="stream" title="Stream" aria-label="Escolher canal">
-    <option value="">Loading…</option>
-  </select>
   <div id="status">conectando…</div>
 
   <div class="controls">
@@ -70,8 +74,9 @@
       <svg class="icon-sound-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 8.5a5 5 0 0 1 0 7"/><path d="M19 6a9 9 0 0 1 0 12"/></svg>
       <svg class="icon-sound-off hidden" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M18 9l4 4"/><path d="M22 9l-4 4"/></svg>
     </button>
-    <button id="settings" title="Escolher canal" aria-label="Escolher canal">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.03.04a2 2 0 0 1-3.94 0L10 20a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.04-.03a2 2 0 0 1 0-3.94L4 10a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.03-.04a2 2 0 0 1 3.94 0L14 4a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.7 1.7 0 0 0 19.4 9c.14.36.34.7.6 1l.04.03a2 2 0 0 1 0 3.94L20 14c-.26.3-.46.64-.6 1z"/></svg>
+    <button id="settings" title="Configurações" aria-label="Abrir configurações">
+      <svg class="settings-gear-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.03.04a2 2 0 0 1-3.94 0L10 20a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.04-.03a2 2 0 0 1 0-3.94L4 10a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.03-.04a2 2 0 0 1 3.94 0L14 4a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.7 1.7 0 0 0 19.4 9c.14.36.34.7.6 1l.04.03a2 2 0 0 1 0 3.94L20 14c-.26.3-.46.64-.6 1z"/></svg>
+      <svg class="settings-update-icon hidden" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
     </button>
     <button id="talk" class="primary" title="Segurar para falar" aria-label="Microfone desligado">
       <span id="talkIcon" aria-hidden="true"></span>
@@ -80,18 +85,25 @@
     <button id="reconnect" title="Reconectar vídeo" aria-label="Reconectar vídeo">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
     </button>
-    <button id="appUpdate" class="update hidden" title="Baixar atualização" aria-label="Baixar nova versão do app">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
-    </button>
     <button id="gate" class="gate" title="Portão" aria-label="Alternar portão">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V7l8-4 8 4v14"/><path d="M8 21V11h8v10"/><path d="M8 15h8"/><path d="M11 18h.01"/></svg>
     </button>
   </div>
 
-  <div id="audioTests" class="test-panel" aria-label="Testes de atraso de áudio">
-    <div class="test-label">Live go2rtc talkback tests</div>
+  <dialog id="settingsModal" class="settings-modal">
+    <div class="settings-card">
+      <div class="settings-header"><strong>Configurações</strong><button id="closeSettings" class="settings-close" aria-label="Fechar">×</button></div>
+      <label class="settings-field">CANAL
+        <select id="stream" title="Stream" aria-label="Escolher canal">
+    <option value="">Loading…</option>
+        </select>
+      </label>
+        <div id="audioTests" class="test-panel" aria-label="Testes de atraso de áudio">
     <button id="stopAudioTest" class="stop">Parar</button>
-  </div>
+        </div>
+      <button id="settingsUpdate" class="settings-update hidden">Baixar atualização</button>
+    </div>
+  </dialog>
 
 <script>
 const pageParams = new URLSearchParams(location.search);
@@ -104,10 +116,12 @@ const statusEl = document.getElementById('status');
 const streamSel = document.getElementById('stream');
 const talkBtn = document.getElementById('talk');
 const reconnectBtn = document.getElementById('reconnect');
-const appUpdateBtn = document.getElementById('appUpdate');
 const soundBtn = document.getElementById('sound');
 const gateBtn = document.getElementById('gate');
 const settingsBtn = document.getElementById('settings');
+const settingsModal = document.getElementById('settingsModal');
+const closeSettingsBtn = document.getElementById('closeSettings');
+const settingsUpdateBtn = document.getElementById('settingsUpdate');
 const talkIcon = document.getElementById('talkIcon');
 const busyText = document.getElementById('busyText');
 const audioTestsEl = document.getElementById('audioTests');
@@ -194,12 +208,21 @@ async function checkAppUpdate(force = false) {
     const manifest = await res.json();
     if (manifest.apkUrl && isVersionNewer(manifest.version, nativeAppVersion)) {
       appUpdateManifest = manifest;
-      appUpdateBtn.classList.remove('hidden');
-      appUpdateBtn.title = `Baixar Campainha ${manifest.version}`;
-      appUpdateBtn.setAttribute('aria-label', `Baixar atualização ${manifest.version}`);
+      settingsBtn.classList.add('update');
+      settingsBtn.querySelector('.settings-gear-icon').classList.add('hidden');
+      settingsBtn.querySelector('.settings-update-icon').classList.remove('hidden');
+      settingsBtn.title = `Baixar Campainha ${manifest.version}`;
+      settingsBtn.setAttribute('aria-label', `Baixar atualização ${manifest.version}`);
+      settingsUpdateBtn.classList.remove('hidden');
+      settingsUpdateBtn.textContent = `Baixar atualização ${manifest.version}`;
     } else {
       appUpdateManifest = null;
-      appUpdateBtn.classList.add('hidden');
+      settingsBtn.classList.remove('update');
+      settingsBtn.querySelector('.settings-gear-icon').classList.remove('hidden');
+      settingsBtn.querySelector('.settings-update-icon').classList.add('hidden');
+      settingsBtn.title = 'Configurações';
+      settingsBtn.setAttribute('aria-label', 'Abrir configurações');
+      settingsUpdateBtn.classList.add('hidden');
     }
   } catch (error) {
     console.warn('app update check failed', error);
@@ -437,20 +460,9 @@ async function toggleTalk() {
   }
   await startTalk();
 }
-function openStreamMenu() {
-  if (typeof streamSel.showPicker === 'function') {
-    streamSel.showPicker();
-  } else {
-    streamSel.focus();
-    streamSel.click();
-  }
-}
 reconnectBtn.onclick = () => {
   connectVideo().catch(e => { console.error(e); setStatus('erro vídeo'); alert(e.message); });
   connectSecondaryVideo().catch(e => { console.error(e); setStatus('erro vídeo secundário'); });
-};
-appUpdateBtn.onclick = () => {
-  if (appUpdateManifest?.apkUrl) location.href = appUpdateManifest.apkUrl;
 };
 streamSel.onchange = () => connectVideo().catch(e => { console.error(e); setStatus('erro vídeo'); alert(e.message); });
 soundBtn.onclick = async () => {
@@ -463,7 +475,13 @@ soundBtn.onclick = async () => {
   setSoundIcon();
 };
 gateBtn.onclick = toggleGate;
-settingsBtn.onclick = openStreamMenu;
+settingsBtn.onclick = () => {
+  if (appUpdateManifest?.apkUrl) location.href = appUpdateManifest.apkUrl;
+  else settingsModal.showModal();
+};
+closeSettingsBtn.onclick = () => settingsModal.close();
+settingsModal.addEventListener('click', (ev) => { if (ev.target === settingsModal) settingsModal.close(); });
+settingsUpdateBtn.onclick = () => { if (appUpdateManifest?.apkUrl) location.href = appUpdateManifest.apkUrl; };
 talkBtn.onclick = () => toggleTalk().catch(e => { console.error(e); stopTalk(); alert(e.message); });
 audioTestsEl.addEventListener('click', (ev) => {
   const btn = ev.target.closest('button[data-test]');
