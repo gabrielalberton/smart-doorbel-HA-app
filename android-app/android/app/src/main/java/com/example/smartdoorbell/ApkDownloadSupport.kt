@@ -7,6 +7,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.webkit.URLUtil
 import android.webkit.WebView
@@ -83,8 +85,8 @@ object ApkDownloadSupport {
                 .setDescription("Baixando atualização do app Campainha")
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalFilesDir(activity, Environment.DIRECTORY_DOWNLOADS, fileName)
 
             if (!userAgent.isNullOrBlank()) request.addRequestHeader("User-Agent", userAgent)
             if (!mimeType.isNullOrBlank()) request.addRequestHeader("Accept", APK_MIME)
@@ -95,10 +97,26 @@ object ApkDownloadSupport {
                 .edit()
                 .putLong(KEY_DOWNLOAD_ID, id)
                 .apply()
+            monitorDownload(activity, id)
             Toast.makeText(activity, "Atualização sendo baixada", Toast.LENGTH_LONG).show()
         }.onFailure {
             Toast.makeText(activity, "Não foi possível baixar a atualização", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun monitorDownload(activity: Activity, downloadId: Long) {
+        val handler = Handler(Looper.getMainLooper())
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        lateinit var poll: Runnable
+        poll = Runnable {
+            if (ApkDownloadReceiver.tryHandle(activity, downloadId, launchInstaller = true)) return@Runnable
+            if (android.os.SystemClock.elapsedRealtime() - startedAt < DOWNLOAD_MONITOR_TIMEOUT_MS) {
+                handler.postDelayed(poll, DOWNLOAD_MONITOR_INTERVAL_MS)
+            } else {
+                Toast.makeText(activity, "O download demorou demais. Tente novamente.", Toast.LENGTH_LONG).show()
+            }
+        }
+        handler.postDelayed(poll, DOWNLOAD_MONITOR_INTERVAL_MS)
     }
 
     private fun canInstallPackages(context: Context): Boolean =
@@ -153,4 +171,7 @@ object ApkDownloadSupport {
             uri.path?.startsWith("/$repo/releases/download/") == true &&
             uri.path?.endsWith(".apk", ignoreCase = true) == true
     }
+
+    private const val DOWNLOAD_MONITOR_INTERVAL_MS = 1_000L
+    private const val DOWNLOAD_MONITOR_TIMEOUT_MS = 10 * 60_000L
 }
