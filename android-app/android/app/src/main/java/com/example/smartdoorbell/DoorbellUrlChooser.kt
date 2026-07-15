@@ -41,6 +41,7 @@ object DoorbellUrlChooser {
     }
 
     private fun isLocalReachable(): Boolean {
+        if (DoorbellConfig.LOCAL_BASE_URL.isBlank()) return false
         return try {
             val conn = (URL(DoorbellConfig.LOCAL_BASE_URL + "/healthz").openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"

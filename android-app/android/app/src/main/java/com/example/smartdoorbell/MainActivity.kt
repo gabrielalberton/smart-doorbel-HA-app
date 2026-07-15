@@ -10,6 +10,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.InputType
+import android.view.ViewGroup
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.getcapacitor.BridgeActivity
@@ -32,10 +37,13 @@ class MainActivity : BridgeActivity() {
         super.onCreate(savedInstanceState)
         DoorbellNotifier.ensureChannels(this)
         ApkDownloadSupport.install(this, bridge.webView)
-        requestNotificationPermissionIfNeeded()
-        if (!handleOpenUrlIntent(intent)) {
+        val configured = DoorbellConfig.initialize(this)
+        if (!configured) {
+            showPairingDialog()
+        } else if (!handleOpenUrlIntent(intent)) {
             loadDoorbellUrl(DoorbellConfig.PUBLIC_BASE_URL + "/", "/")
         }
+        if (configured) requestNotificationPermissionIfNeeded()
     }
 
     override fun onStart() {
@@ -47,7 +55,7 @@ class MainActivity : BridgeActivity() {
         super.onResume()
         activityResumed = true
         ApkDownloadSupport.resumePendingIfAllowed(this)
-        scheduleSpecialAccessCheck()
+        if (DoorbellConfig.isConfigured()) scheduleSpecialAccessCheck()
     }
 
     override fun onPause() {
@@ -82,13 +90,64 @@ class MainActivity : BridgeActivity() {
         }
     }
 
+    private fun showPairingDialog() {
+        if (isFinishing || isDestroyed || setupDialog?.isShowing == true) return
+        val padding = (20 * resources.displayMetrics.density).toInt()
+        val endpointInput = EditText(this).apply {
+            hint = "https://campainha.exemplo.com"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine(true)
+        }
+        val passwordInput = EditText(this).apply {
+            hint = "Senha"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(padding, 0, padding, 0)
+            addView(endpointInput, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(passwordInput, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        setupDialog = AlertDialog.Builder(this)
+            .setTitle("Conectar à campainha")
+            .setMessage("Informe o endpoint HTTPS e a senha configurada no servidor.")
+            .setView(form)
+            .setCancelable(false)
+            .setPositiveButton("Conectar", null)
+            .create()
+        setupDialog?.setOnShowListener {
+            setupDialog?.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener { button ->
+                button.isEnabled = false
+                PairingConfig.pairAsync(endpointInput.text.toString(), passwordInput.text.toString()) { result ->
+                    button.isEnabled = true
+                    result.onSuccess { config ->
+                        PairingConfig.save(this, config)
+                        DoorbellConfig.apply(config)
+                        passwordInput.text?.clear()
+                        setupDialog?.dismiss()
+                        setupDialog = null
+                        Toast.makeText(this, "Campainha conectada", Toast.LENGTH_SHORT).show()
+                        requestNotificationPermissionIfNeeded()
+                        loadDoorbellUrl(DoorbellConfig.PUBLIC_BASE_URL + "/", "/")
+                    }.onFailure { error ->
+                        passwordInput.text?.clear()
+                        passwordInput.requestFocus()
+                        Toast.makeText(this, error.message ?: "Falha no pareamento", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+        setupDialog?.show()
+    }
+
     private fun scheduleSpecialAccessCheck() {
         mainHandler.removeCallbacksAndMessages(SETUP_TOKEN)
         mainHandler.postAtTime({ promptNextMissingAccess() }, SETUP_TOKEN, android.os.SystemClock.uptimeMillis() + 500)
     }
 
     private fun promptNextMissingAccess() {
-        if (!activityResumed || isFinishing || isDestroyed || setupDialog?.isShowing == true) return
+        if (!DoorbellConfig.isConfigured() || !activityResumed || isFinishing || isDestroyed || setupDialog?.isShowing == true) return
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return

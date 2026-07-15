@@ -12,7 +12,7 @@ The repository contains:
 
 No Home Assistant token, webhook URL, camera credential, signing key or Firebase configuration is committed. The repository intentionally excludes `.env`, `google-services.json`, keystores, APK/AAB files, build output and local Android configuration.
 
-Public/local base URLs are configuration rather than secrets: they are necessarily embedded in a configured APK. Authentication and authorization must still be enforced by your reverse proxy/backend.
+The APK does not embed a household's URLs, streams or Home Assistant trigger metadata. On first launch it asks for the server endpoint and a pairing password. The server returns non-secret runtime configuration; the password is never saved in the app.
 
 ## Quick start
 
@@ -21,6 +21,9 @@ cp .env.example .env
 # Edit .env for your installation.
 
 cd server
+node scripts/hash-pairing-password.js
+# Put only the generated hash in ../.env as PAIRING_PASSWORD_HASH.
+
 npm ci
 npm run start:configured
 ```
@@ -36,6 +39,8 @@ cd android
 ```
 
 The debug APK is generated under `android-app/android/app/build/outputs/apk/debug/` and is ignored by Git.
+
+On first launch, enter only `https://your-doorbell-host.example` and the pairing password selected by the server administrator.
 
 See [Configuration](docs/CONFIGURATION.md) for every installation-specific value and [Releases](docs/RELEASES.md) for signing and automatic update setup.
 

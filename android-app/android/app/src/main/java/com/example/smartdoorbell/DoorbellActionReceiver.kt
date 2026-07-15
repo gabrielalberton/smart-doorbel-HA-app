@@ -6,10 +6,11 @@ import android.content.Intent
 
 class DoorbellActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (!DoorbellConfig.initialize(context)) return
         when (intent.action) {
             DoorbellConfig.ACTION_TEST_RING -> DoorbellNotifier.showIncomingCall(
                 context,
-                intent.getStringExtra(DoorbellConfig.EXTRA_TITLE) ?: "Campainha",
+                intent.getStringExtra(DoorbellConfig.EXTRA_TITLE) ?: DoorbellConfig.DOORBELL_TITLE,
                 intent.getStringExtra(DoorbellConfig.EXTRA_BODY) ?: "Teste de chamada da campainha",
                 intent.getStringExtra(DoorbellConfig.EXTRA_OPEN_URL) ?: DoorbellConfig.DEFAULT_ATTEND_URL
             )

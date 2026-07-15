@@ -5,7 +5,7 @@
 Yes. A public GitHub Release can be the canonical APK source:
 
 1. A tag such as `v1.0.0` triggers `.github/workflows/release-android.yml`.
-2. GitHub Actions builds an APK with installation-specific repository variables.
+2. GitHub Actions builds one endpoint-independent APK.
 3. The APK is signed with a keystore stored in Actions secrets.
 4. The workflow publishes the APK and SHA-256 file in the Release.
 5. The backend reads `releases/latest`; the app displays its download button when the release tag is newer than its installed version.
@@ -16,13 +16,12 @@ No GitHub API token is needed for reading releases from a public repository. The
 
 Configure under **Settings → Secrets and variables → Actions → Variables**:
 
-- `PUBLIC_BASE_URL`
-- `LOCAL_BASE_URL`
-- `AUTH_HOST` (optional)
 - `ANDROID_APPLICATION_ID`
 - `APP_DEEP_LINK_SCHEME`
 - `APP_NAME`
 - `ANDROID_VERSION_CODE_BASE` — use a number above every previously distributed build; the workflow adds `github.run_number`.
+
+Base URLs, authentication host, Home Assistant trigger metadata and stream names belong to each server's private `.env` and are downloaded during first-run pairing. They are not GitHub build variables.
 
 ## Required Actions secrets
 

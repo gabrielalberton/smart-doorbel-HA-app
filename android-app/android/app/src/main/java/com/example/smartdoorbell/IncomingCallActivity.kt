@@ -56,6 +56,11 @@ class IncomingCallActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!DoorbellConfig.initialize(this)) {
+            startActivity(Intent(this, MainActivity::class.java))
+            finish()
+            return
+        }
         showOverLockScreen()
         buildLayout()
         DoorbellUrlChooser.chooseAsync(previewUrl, "/?native_call=1") { url ->

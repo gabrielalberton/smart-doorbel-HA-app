@@ -48,9 +48,6 @@ jobs:
 
       - name: Create build configuration
         env:
-          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
-          LOCAL_BASE_URL: ${{ vars.LOCAL_BASE_URL }}
-          AUTH_HOST: ${{ vars.AUTH_HOST }}
           ANDROID_APPLICATION_ID: ${{ vars.ANDROID_APPLICATION_ID }}
           APP_DEEP_LINK_SCHEME: ${{ vars.APP_DEEP_LINK_SCHEME }}
           APP_NAME: ${{ vars.APP_NAME }}
@@ -58,13 +55,8 @@ jobs:
           GITHUB_RELEASE_REPO: ${{ github.repository }}
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          test -n "$PUBLIC_BASE_URL"
-          test -n "$LOCAL_BASE_URL"
           test -n "$ANDROID_APPLICATION_ID"
           cat > .env <<EOF
-          PUBLIC_BASE_URL=$PUBLIC_BASE_URL
-          LOCAL_BASE_URL=$LOCAL_BASE_URL
-          AUTH_HOST=$AUTH_HOST
           ANDROID_APPLICATION_ID=$ANDROID_APPLICATION_ID
           APP_DEEP_LINK_SCHEME=${APP_DEEP_LINK_SCHEME:-$ANDROID_APPLICATION_ID}
           APP_NAME=${APP_NAME:-Smart Doorbell}

@@ -23,19 +23,18 @@ function readEnv(file) {
 }
 
 const values = { ...readEnv(path.join(repoRoot, '.env.example')), ...readEnv(path.join(repoRoot, '.env')), ...process.env };
-const required = ['ANDROID_APPLICATION_ID', 'APP_NAME', 'PUBLIC_BASE_URL', 'LOCAL_BASE_URL'];
-for (const key of required) {
+for (const key of ['ANDROID_APPLICATION_ID', 'APP_NAME']) {
   if (!values[key]) throw new Error(`Missing ${key}. Copy .env.example to .env and configure it.`);
 }
 
-const host = (url) => new URL(url).host;
-const navigation = [...new Set([host(values.PUBLIC_BASE_URL), host(values.LOCAL_BASE_URL), values.AUTH_HOST].filter(Boolean))];
 const config = {
   appId: values.ANDROID_APPLICATION_ID,
   appName: values.APP_NAME,
   webDir: 'www',
-  server: { allowNavigation: navigation },
+  // The trusted endpoint is selected by the user and validated through /api/pair.
+  // Capacitor therefore cannot use a compile-time hostname allowlist.
+  server: { allowNavigation: ['*'] },
   android: { allowMixedContent: false, captureInput: true, webContentsDebuggingEnabled: false },
 };
 fs.writeFileSync(path.join(appRoot, 'capacitor.config.json'), `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-console.log(`Generated capacitor.config.json for ${navigation.join(', ')}`);
+console.log('Generated endpoint-independent capacitor.config.json');

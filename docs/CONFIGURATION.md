@@ -1,8 +1,8 @@
 # Installation-specific configuration
 
-Copy `.env.example` to the ignored `.env`. Values are divided into **embedded public configuration**, **server configuration**, and **secrets**.
+Copy `.env.example` to the ignored `.env`. The distributed APK is endpoint-independent: on first launch the user supplies only the server's HTTPS endpoint and pairing password. The password is verified but never saved by the app.
 
-## Values embedded in the APK
+## Values fixed in the universal APK
 
 These are not secrets. Anyone can extract them from an APK, so never put passwords or tokens in them.
 
@@ -13,14 +13,25 @@ These are not secrets. Anyone can extract them from an APK, so never put passwor
 | `APP_NAME` | yes | Label shown by Android and Capacitor. |
 | `ANDROID_VERSION_NAME` | yes | Human version used by the update comparison. Releases derive this from the `vX.Y.Z` tag. |
 | `ANDROID_VERSION_CODE` | yes | Strictly increasing Android integer. |
+
+These values define Android identity/signature only. They are not installation settings. A normal user installing the published APK does not fill them.
+
+## Configuration returned during pairing
+
+The server reads these values and returns the non-secret subset from `POST /api/pair` after password verification:
+
+| Variable | Required | Purpose |
+|---|---:|---|
 | `PUBLIC_BASE_URL` | yes | Public HTTPS origin of this server/webapp. |
-| `LOCAL_BASE_URL` | yes | Local HTTPS origin tested first by the app. |
-| `AUTH_HOST` | no | Authentication host allowed inside the WebView, if redirects use one. |
+| `LOCAL_BASE_URL` | no | Local HTTPS origin tested first by the app. |
+| `AUTH_HOST` | no | Authentication redirect host accepted inside the WebView. |
 | `GITHUB_RELEASE_REPO` | recommended | Public `owner/repository` whose APK Releases are trusted. |
 | `HOME_ASSISTANT_PACKAGE_PREFIX` | yes for HA trigger | Allowed HA Companion package prefix. |
 | `DOORBELL_TRIGGER_TAG` | yes for HA trigger | Exact tag used by the discreet HA notification. |
 | `DOORBELL_TRIGGER_CHANNEL` | yes for HA trigger | Exact Android notification channel used by HA. |
 | `DOORBELL_NOTIFICATION_TITLE` | yes for HA trigger | Title fragment required before a notification becomes a call. |
+
+The app stores this non-secret configuration in private app storage. It does **not** store the pairing password.
 
 ## Server and camera topology
 
@@ -45,8 +56,18 @@ Camera usernames/passwords belong in Frigate/go2rtc configuration, **not** in th
 |---|---:|---|
 | `HA_WEBHOOK_URL` | for gate button | Server `.env` or secret manager only. Never frontend/APK. |
 | `ATTEND_WEBHOOK_URL` | optional | Server `.env` or secret manager only. |
+| `PAIRING_PASSWORD_HASH` | yes | Scrypt hash of the first-run pairing password. Never store the plaintext password. |
 | `android-app/android/app/google-services.json` | only for FCM | Download from your own Firebase project; ignored by Git. |
 | Android signing keystore/passwords | for distributable updates | Local secure storage or GitHub Actions secrets. Never commit. |
+
+Generate the pairing hash interactively so the plaintext does not enter shell history:
+
+```bash
+cd server
+node scripts/hash-pairing-password.js
+```
+
+Copy only the resulting `scrypt:...` value into `PAIRING_PASSWORD_HASH` in the private server `.env`.
 
 ## Optional server-hosted updater
 

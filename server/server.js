@@ -1,11 +1,12 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
+const crypto = require('node:crypto');
 const { request } = require('undici');
 const Fastify = require('fastify');
 const fastifyStatic = require('@fastify/static');
 
-const app = Fastify({ logger: false });
+const app = Fastify({ logger: false, trustProxy: true });
 // go2rtc WebRTC offers are raw SDP. Fastify does not parse application/sdp by default.
 app.addContentTypeParser('application/sdp', { parseAs: 'string' }, (_req, body, done) => done(null, body));
 app.addContentTypeParser('text/plain', { parseAs: 'string' }, (_req, body, done) => done(null, body));
@@ -25,6 +26,16 @@ const APP_UPDATE_APK_PATH = process.env.APP_UPDATE_APK_PATH || '';
 const APP_UPDATE_SHA256 = process.env.APP_UPDATE_SHA256 || '';
 const GITHUB_RELEASE_REPO = (process.env.GITHUB_RELEASE_REPO || '').trim();
 const GITHUB_RELEASE_ASSET_SUFFIX = process.env.GITHUB_RELEASE_ASSET_SUFFIX || '.apk';
+const PAIRING_PASSWORD_HASH = process.env.PAIRING_PASSWORD_HASH || '';
+const PAIRING_MAX_ATTEMPTS = Math.max(1, Number(process.env.PAIRING_MAX_ATTEMPTS || 5));
+const PAIRING_WINDOW_MS = Math.max(1_000, Number(process.env.PAIRING_WINDOW_MS || 10 * 60_000));
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+const LOCAL_BASE_URL = (process.env.LOCAL_BASE_URL || '').replace(/\/+$/, '');
+const AUTH_HOST = (process.env.AUTH_HOST || '').trim();
+const HOME_ASSISTANT_PACKAGE_PREFIX = process.env.HOME_ASSISTANT_PACKAGE_PREFIX || 'io.homeassistant.companion.';
+const DOORBELL_TRIGGER_TAG = process.env.DOORBELL_TRIGGER_TAG || 'smart_doorbell_trigger';
+const DOORBELL_TRIGGER_CHANNEL = process.env.DOORBELL_TRIGGER_CHANNEL || DOORBELL_TRIGGER_TAG;
+const DOORBELL_NOTIFICATION_TITLE = process.env.DOORBELL_NOTIFICATION_TITLE || 'Doorbell';
 const AUDIO_TESTS = {};
 if (process.env.TALKBACK_TCP_STREAM) AUDIO_TESTS.live_tcp_pcmu = {
   label: 'Live TCP PCMU', dst: process.env.TALKBACK_TCP_STREAM,
@@ -36,8 +47,32 @@ if (process.env.TALKBACK_UDP_STREAM) AUDIO_TESTS.live_udp_pcmu = {
 };
 let githubReleaseCache = null;
 let talkLock = null;
+const pairingAttempts = new Map();
 
 function nowMs() { return Date.now(); }
+function verifyPairingPassword(password) {
+  const parts = PAIRING_PASSWORD_HASH.split(':');
+  if (parts.length !== 3 || parts[0] !== 'scrypt') return false;
+  try {
+    const salt = Buffer.from(parts[1], 'hex');
+    const expected = Buffer.from(parts[2], 'hex');
+    if (salt.length < 16 || expected.length < 32) return false;
+    const supplied = crypto.scryptSync(String(password), salt, expected.length);
+    return crypto.timingSafeEqual(supplied, expected);
+  } catch {
+    return false;
+  }
+}
+function pairingRateState(ip) {
+  const now = nowMs();
+  const current = pairingAttempts.get(ip);
+  if (!current || current.resetAt <= now) {
+    const fresh = { failures: 0, resetAt: now + PAIRING_WINDOW_MS };
+    pairingAttempts.set(ip, fresh);
+    return fresh;
+  }
+  return current;
+}
 function normalizeClientId(req) {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const raw = String(body.clientId || req.headers['x-client-id'] || '').trim();
@@ -65,6 +100,33 @@ function talkLockStatus(clientId = '') {
 app.register(fastifyStatic, { root: path.join(__dirname, 'public') });
 
 app.get('/healthz', async () => 'ok');
+app.post('/api/pair', async (req, reply) => {
+  if (!PAIRING_PASSWORD_HASH || !PUBLIC_BASE_URL) {
+    return reply.code(503).send({ ok: false, error: 'pairing not configured' });
+  }
+  reply.header('cache-control', 'no-store');
+  const rate = pairingRateState(req.ip);
+  if (rate.failures >= PAIRING_MAX_ATTEMPTS) {
+    reply.header('retry-after', String(Math.max(1, Math.ceil((rate.resetAt - nowMs()) / 1000))));
+    return reply.code(429).send({ ok: false, error: 'too many attempts' });
+  }
+  if (!verifyPairingPassword(req.body?.password || '')) {
+    rate.failures += 1;
+    return reply.code(401).send({ ok: false, error: 'invalid credentials' });
+  }
+  pairingAttempts.delete(req.ip);
+  return {
+    ok: true,
+    publicBaseUrl: PUBLIC_BASE_URL,
+    localBaseUrl: LOCAL_BASE_URL,
+    authHost: AUTH_HOST,
+    githubReleaseRepo: GITHUB_RELEASE_REPO,
+    homeAssistantPackagePrefix: HOME_ASSISTANT_PACKAGE_PREFIX,
+    triggerTag: DOORBELL_TRIGGER_TAG,
+    triggerChannel: DOORBELL_TRIGGER_CHANNEL,
+    doorbellTitle: DOORBELL_NOTIFICATION_TITLE,
+  };
+});
 app.get('/api/config', async () => ({
   defaultStream: DEFAULT_STREAM,
   primaryStreams: PRIMARY_STREAM_OPTIONS,

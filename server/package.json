@@ -1,1 +1,13 @@
-{"scripts":{"start":"node server.js","start:configured":"node --env-file=../.env server.js"},"dependencies":{"@fastify/static":"latest","fastify":"latest","undici":"^8.7.0"},"devDependencies":{}}
+{
+  "scripts": {
+    "start": "node server.js",
+    "start:configured": "node --env-file=../.env server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@fastify/static": "latest",
+    "fastify": "latest",
+    "undici": "^8.7.0"
+  },
+  "devDependencies": {}
+}

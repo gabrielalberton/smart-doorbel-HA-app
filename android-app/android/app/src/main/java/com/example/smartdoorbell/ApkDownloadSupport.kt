@@ -147,7 +147,7 @@ object ApkDownloadSupport {
             uri.path == "/app-update/latest.apk"
         if (isConfiguredServer) return true
 
-        val repo = BuildConfig.GITHUB_RELEASE_REPO.trim().trim('/')
+        val repo = DoorbellConfig.GITHUB_RELEASE_REPO.trim().trim('/')
         return repo.matches(Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")) &&
             uri.host == "github.com" &&
             uri.path?.startsWith("/$repo/releases/download/") == true &&

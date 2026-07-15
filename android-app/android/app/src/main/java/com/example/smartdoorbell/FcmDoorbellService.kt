@@ -5,12 +5,13 @@ import com.google.firebase.messaging.RemoteMessage
 
 class FcmDoorbellService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
+        if (!DoorbellConfig.initialize(this)) return
         val data = message.data
         val isDoorbell = data["type"] == "doorbell_ring" || data["event"] == "ring" || data["ring"] == "true"
         if (isDoorbell || message.notification != null) {
             DoorbellNotifier.showIncomingCall(
                 this,
-                data["title"] ?: message.notification?.title ?: BuildConfig.DOORBELL_TITLE,
+                data["title"] ?: message.notification?.title ?: DoorbellConfig.DOORBELL_TITLE,
                 data["body"] ?: message.notification?.body ?: "Alguém tocou a campainha",
                 data["openUrl"] ?: DoorbellConfig.DEFAULT_ATTEND_URL
             )

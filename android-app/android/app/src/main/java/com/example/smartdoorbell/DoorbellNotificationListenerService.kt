@@ -10,17 +10,18 @@ import android.util.Log
 class DoorbellNotificationListenerService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         try {
+            if (!DoorbellConfig.initialize(this)) return
             if (!isHomeAssistantPackage(sbn.packageName)) return
 
             val notification = sbn.notification ?: return
             val channelId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) notification.channelId else ""
-            val isDedicatedTrigger = sbn.tag == TRIGGER_TAG || channelId == TRIGGER_CHANNEL
+            val isDedicatedTrigger = sbn.tag == DoorbellConfig.TRIGGER_TAG || channelId == DoorbellConfig.TRIGGER_CHANNEL
             if (!isDedicatedTrigger) return
 
             val extras = notification.extras
             val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
             val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
-            val isDoorbell = title.contains(BuildConfig.DOORBELL_TITLE, ignoreCase = true)
+            val isDoorbell = title.contains(DoorbellConfig.DOORBELL_TITLE, ignoreCase = true)
             if (!isDoorbell || !acquireTriggerWindow()) return
 
             // O HA é apenas transporte. Remova o gatilho visual assim que o APK o consumir.
@@ -29,7 +30,7 @@ class DoorbellNotificationListenerService : NotificationListenerService() {
             Log.i(TAG, "Gatilho HA consumido; abrindo chamada nativa da campainha")
             DoorbellNotifier.showIncomingCall(
                 this,
-                title.ifBlank { BuildConfig.DOORBELL_TITLE },
+                title.ifBlank { DoorbellConfig.DOORBELL_TITLE },
                 text.ifBlank { "Alguém tocou a campainha" },
                 DoorbellConfig.DEFAULT_ATTEND_URL
             )
@@ -39,7 +40,7 @@ class DoorbellNotificationListenerService : NotificationListenerService() {
     }
 
     private fun isHomeAssistantPackage(packageName: String): Boolean {
-        return packageName.startsWith(BuildConfig.HA_PACKAGE_PREFIX)
+        return packageName.startsWith(DoorbellConfig.HA_PACKAGE_PREFIX)
     }
 
     private fun acquireTriggerWindow(): Boolean = synchronized(TRIGGER_LOCK) {
@@ -51,8 +52,7 @@ class DoorbellNotificationListenerService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "DoorbellNotificationListener"
-        private val TRIGGER_TAG = BuildConfig.TRIGGER_TAG
-        private val TRIGGER_CHANNEL = BuildConfig.TRIGGER_CHANNEL
+
         private const val MIN_TRIGGER_INTERVAL_MS = 5_000L
         private val TRIGGER_LOCK = Any()
         private var lastTriggerElapsedMs = 0L

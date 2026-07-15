@@ -2,7 +2,6 @@ apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 
 import java.util.Properties
-import java.net.URI
 
 // Public defaults come from .env.example; private installation values come from the
 // gitignored repository-root .env or CI environment variables.
@@ -26,7 +25,6 @@ def cfg = { String key, String fallback = '' ->
 def quoted = { String value -> '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"' }
 def applicationIdValue = cfg('ANDROID_APPLICATION_ID', 'com.example.smartdoorbell')
 def deepLinkSchemeValue = cfg('APP_DEEP_LINK_SCHEME', applicationIdValue)
-def baseHost = { String raw -> new URI(raw).host }
 
 def signingFile = System.getenv('ANDROID_KEYSTORE_FILE')
 def signingReady = signingFile && System.getenv('ANDROID_KEYSTORE_PASSWORD') && System.getenv('ANDROID_KEY_ALIAS') && System.getenv('ANDROID_KEY_PASSWORD')
@@ -55,14 +53,7 @@ android {
         resValue "string", "app_name", cfg('APP_NAME', 'Smart Doorbell')
         resValue "string", "title_activity_main", cfg('APP_NAME', 'Smart Doorbell')
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        manifestPlaceholders = [
-            doorbellScheme: deepLinkSchemeValue,
-            publicDoorbellHost: baseHost(cfg('PUBLIC_BASE_URL', 'https://doorbell.example.com')),
-            localDoorbellHost: baseHost(cfg('LOCAL_BASE_URL', 'https://doorbell.local.example.com'))
-        ]
-        buildConfigField "String", "LOCAL_BASE_URL", quoted(cfg('LOCAL_BASE_URL', 'https://doorbell.local.example.com').replaceAll('/+$', ''))
-        buildConfigField "String", "PUBLIC_BASE_URL", quoted(cfg('PUBLIC_BASE_URL', 'https://doorbell.example.com').replaceAll('/+$', ''))
-        buildConfigField "String", "AUTH_HOST", quoted(cfg('AUTH_HOST', 'auth.example.com'))
+        manifestPlaceholders = [doorbellScheme: deepLinkSchemeValue]
         buildConfigField "String", "DEEP_LINK_SCHEME", quoted(deepLinkSchemeValue)
         buildConfigField "String", "GITHUB_RELEASE_REPO", quoted(cfg('GITHUB_RELEASE_REPO', ''))
         buildConfigField "String", "HA_PACKAGE_PREFIX", quoted(cfg('HOME_ASSISTANT_PACKAGE_PREFIX', 'io.homeassistant.companion.'))
