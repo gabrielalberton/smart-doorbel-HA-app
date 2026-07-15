@@ -12,7 +12,19 @@ Yes. A public GitHub Release can be the canonical APK source:
 
 No GitHub API token is needed for reading releases from a public repository. The backend caches the latest-release response for five minutes.
 
-## Repository variables
+## Preferred release path: build on the trusted NUC
+
+This deployment intentionally keeps the signing keystore off GitHub. The preferred flow is:
+
+1. build and sign on the always-on NUC with the existing keystore;
+2. verify package ID, increasing `versionCode`, certificate, APK magic and SHA-256 locally;
+3. create the Git tag and push it;
+4. publish the verified APK and checksum with `gh release create`;
+5. download the GitHub asset again and compare it byte-for-byte before offering it through the update endpoint.
+
+The GitHub Actions workflow is optional and manual-only. It will not run when a tag is pushed, and signing secrets should not be configured unless the deployment owner explicitly changes this policy.
+
+## Optional GitHub Actions variables
 
 Configure under **Settings → Secrets and variables → Actions → Variables**:
 
@@ -23,7 +35,7 @@ Configure under **Settings → Secrets and variables → Actions → Variables**
 
 Base URLs, authentication host, Home Assistant trigger metadata and stream names belong to each server's private `.env` and are downloaded during first-run pairing. They are not GitHub build variables.
 
-## Required Actions secrets
+## Optional GitHub Actions secrets
 
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`

@@ -44,6 +44,8 @@ On first launch, enter only `https://your-doorbell-host.example` and the pairing
 
 See [Configuration](docs/CONFIGURATION.md) for every installation-specific value and [Releases](docs/RELEASES.md) for signing and automatic update setup.
 
+For this deployment, releases are built, signed and verified on the trusted NUC and then uploaded with the GitHub CLI. GitHub-hosted signing is retained only as an optional manual workflow.
+
 ## Update flow
 
 When `GITHUB_RELEASE_REPO` is configured, the server's `/app-update/manifest.json` reads the latest public GitHub Release, selects its APK asset and returns the release version/download URL. The Android app only accepts release downloads from the configured repository (or the configured server's legacy `/app-update/latest.apk`).
