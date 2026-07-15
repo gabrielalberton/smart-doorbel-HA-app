@@ -1,6 +1,6 @@
 {
   "name": "smart-doorbell-android",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "configure": "node scripts/configure.mjs",
