@@ -1,0 +1,20 @@
+{
+  "name": "Campainha Interfone",
+  "short_name": "Campainha",
+  "description": "Interfone da campainha com vídeo, microfone e portão.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#06080c",
+  "theme_color": "#1268ff",
+  "categories": ["utilities", "smart-home"],
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

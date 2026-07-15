@@ -1,0 +1,15 @@
+services:
+  smart-doorbell:
+    build: ./server
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    # Join the Docker network that can resolve your Frigate/go2rtc services.
+    # networks:
+    #   - smart_home
+
+# networks:
+#   smart_home:
+#     external: true

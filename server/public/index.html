@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1268ff" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Campainha" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icons/icon.svg" />
+  <title>Campainha</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #000; color: white; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; width: 100%; min-height: 100%; background: #06080c; }
+    body { min-height: 100svh; display: grid; grid-template-rows: auto auto auto; align-content: start; gap: 10px; padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); overflow-x: hidden; overflow-y: auto; }
+    #stage, #secondaryStage { width: 100%; background: #000; display: flex; align-items: center; justify-content: center; border-radius: 14px; overflow: hidden; box-shadow: 0 10px 35px rgba(0,0,0,.35); }
+    video { width: 100%; height: auto; object-fit: contain; background: #000; display: block; }
+    .topbar, .controls { display: flex; align-items: center; justify-content: center; gap: 10px; }
+    .topbar { display: none; }
+    .controls { min-height: 76px; padding-bottom: 2px; }
+    .left, .right { display: flex; align-items: center; gap: 8px; }
+    button, select { border: 0; color: white; background: #151d2b; box-shadow: 0 6px 20px rgba(0,0,0,.24); }
+    button { width: 56px; height: 56px; border-radius: 999px; display: grid; place-items: center; line-height: 1; cursor: pointer; }
+    button svg { width: 26px; height: 26px; stroke: currentColor; stroke-width: 2.35; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    button:active { transform: scale(.96); }
+    button.primary { position: relative; width: 72px; height: 72px; background: #1268ff; isolation: isolate; }
+    button.primary svg { width: 34px; height: 34px; }
+    button.primary::before, button.primary::after { content: ""; position: absolute; inset: -12px; border: 4px solid rgba(255,255,255,.92); border-radius: inherit; opacity: 0; transform: scale(.78); pointer-events: none; z-index: -1; box-shadow: 0 0 18px rgba(223,48,48,.75), 0 0 34px rgba(255,255,255,.34); }
+    button.primary.active { background: #df3030; box-shadow: 0 0 0 5px rgba(255,255,255,.18), 0 0 26px rgba(223,48,48,.75), 0 6px 20px rgba(0,0,0,.24); }
+    button.primary.sending::before { animation: mic-wave 1.25s ease-out infinite; }
+    button.primary.sending::after { animation: mic-wave 1.25s ease-out .42s infinite; }
+    @keyframes mic-wave { 0% { opacity: .98; transform: scale(.78); } 55% { opacity: .58; } 100% { opacity: 0; transform: scale(1.72); } }
+    button.primary.busy { background: #4b5563; cursor: not-allowed; opacity: .82; box-shadow: 0 6px 20px rgba(0,0,0,.24); }
+    button.primary:disabled { cursor: not-allowed; }
+    #busyText { display: none; color: #f8fafc; background: #374151; border-radius: 999px; padding: 7px 10px; font-size: 12px; font-weight: 700; white-space: nowrap; box-shadow: 0 6px 20px rgba(0,0,0,.24); }
+    #busyText.visible { display: inline-flex; }
+    button.gate { background: #f08c00; }
+    button.update { background: #16a34a; }
+    button.warn { background: #df3030; }
+    select { max-width: 116px; height: 38px; border-radius: 999px; padding: 0 26px 0 10px; font-weight: 700; font-size: 12px; outline: none; }
+    #status { display: none; }
+    #stream { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+    .test-panel { width: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 0 0 4px; }
+    .test-panel button { width: auto; min-width: 86px; height: 42px; border-radius: 999px; padding: 0 12px; font-size: 12px; font-weight: 800; letter-spacing: .01em; background: #223047; }
+    .test-panel button.stop { background: #5f2932; }
+    .test-panel button:disabled { opacity: .55; cursor: wait; }
+    .test-label { width: 100%; text-align: center; color: #94a3b8; font-size: 11px; font-weight: 700; }
+    .hidden { display: none !important; }
+    body.native-call { min-height: 0; display: block; padding: 0; overflow: hidden; background: #000; }
+    body.native-call #stage, body.native-call #secondaryStage { width: 100%; margin: 0 0 4px; border-radius: 0; box-shadow: none; }
+    body.native-call video { width: 100%; height: auto; object-fit: contain; }
+    body.native-call .controls, body.native-call .test-panel, body.native-call #stream, body.native-call #status { display: none !important; }
+    @media (max-width: 520px) { body { gap: 8px; } button { width: 52px; height: 52px; font-size: 23px; } button.primary { width: 68px; height: 68px; } }
+  </style>
+</head>
+<body>
+  <div id="stage"><video id="video" autoplay playsinline></video></div>
+  <div id="secondaryStage"><video id="secondaryVideo" autoplay playsinline muted></video></div>
+
+  <select id="stream" title="Stream" aria-label="Escolher canal">
+    <option value="">Loading…</option>
+  </select>
+  <div id="status">conectando…</div>
+
+  <div class="controls">
+    <button id="sound" title="Som da câmera" aria-label="Som da câmera ligado">
+      <svg class="icon-sound-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 8.5a5 5 0 0 1 0 7"/><path d="M19 6a9 9 0 0 1 0 12"/></svg>
+      <svg class="icon-sound-off hidden" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M18 9l4 4"/><path d="M22 9l-4 4"/></svg>
+    </button>
+    <button id="settings" title="Escolher canal" aria-label="Escolher canal">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.03.04a2 2 0 0 1-3.94 0L10 20a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.04-.03a2 2 0 0 1 0-3.94L4 10a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.03-.04a2 2 0 0 1 3.94 0L14 4a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.7 1.7 0 0 0 19.4 9c.14.36.34.7.6 1l.04.03a2 2 0 0 1 0 3.94L20 14c-.26.3-.46.64-.6 1z"/></svg>
+    </button>
+    <button id="talk" class="primary" title="Segurar para falar" aria-label="Microfone desligado">
+      <span id="talkIcon" aria-hidden="true"></span>
+    </button>
+    <span id="busyText" aria-live="polite">Microfone em uso</span>
+    <button id="reconnect" title="Reconectar vídeo" aria-label="Reconectar vídeo">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+    </button>
+    <button id="appUpdate" class="update hidden" title="Baixar atualização" aria-label="Baixar nova versão do app">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+    </button>
+    <button id="gate" class="gate" title="Portão" aria-label="Alternar portão">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V7l8-4 8 4v14"/><path d="M8 21V11h8v10"/><path d="M8 15h8"/><path d="M11 18h.01"/></svg>
+    </button>
+  </div>
+
+  <div id="audioTests" class="test-panel" aria-label="Testes de atraso de áudio">
+    <div class="test-label">Live go2rtc talkback tests</div>
+    <button id="stopAudioTest" class="stop">Parar</button>
+  </div>
+
+<script>
+const pageParams = new URLSearchParams(location.search);
+const nativeCallMode = pageParams.get('native_call') === '1';
+const nativeAppVersion = pageParams.get('app_version') || '';
+if (nativeCallMode) document.body.classList.add('native-call');
+const video = document.getElementById('video');
+const secondaryVideo = document.getElementById('secondaryVideo');
+const statusEl = document.getElementById('status');
+const streamSel = document.getElementById('stream');
+const talkBtn = document.getElementById('talk');
+const reconnectBtn = document.getElementById('reconnect');
+const appUpdateBtn = document.getElementById('appUpdate');
+const soundBtn = document.getElementById('sound');
+const gateBtn = document.getElementById('gate');
+const settingsBtn = document.getElementById('settings');
+const talkIcon = document.getElementById('talkIcon');
+const busyText = document.getElementById('busyText');
+const audioTestsEl = document.getElementById('audioTests');
+const stopAudioTestBtn = document.getElementById('stopAudioTest');
+const MIC_ON_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/><path d="M8 22h8"/></svg>';
+const MIC_OFF_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/><path d="M8 22h8"/><path d="M4 4l16 16"/></svg>';
+let videoPc = null;
+let secondaryPc = null;
+let talkPc = null;
+let micStream = null;
+let wakeLock = null;
+let gateBusy = false;
+let heartbeatTimer = null;
+let statusTimer = null;
+let backgroundMicTimer = null;
+const BACKGROUND_MIC_TIMEOUT_MS = 60_000;
+let appUpdateManifest = null;
+let secondaryStream = '';
+let lastUpdateCheckAt = 0;
+const UPDATE_CHECK_MIN_INTERVAL_MS = 15 * 60_000;
+const clientId = getClientId();
+
+async function loadRuntimeConfig() {
+  const res = await fetch('/api/config', { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Config HTTP ${res.status}`);
+  const config = await res.json();
+  const streams = Array.isArray(config.primaryStreams) && config.primaryStreams.length
+    ? config.primaryStreams : [config.defaultStream].filter(Boolean);
+  if (!streams.length) throw new Error('No primary go2rtc stream configured');
+  streamSel.replaceChildren(...streams.map((stream) => {
+    const option = document.createElement('option');
+    option.value = stream;
+    option.textContent = stream;
+    return option;
+  }));
+  streamSel.value = config.defaultStream || streams[0];
+  secondaryStream = config.secondaryStream || '';
+  document.getElementById('secondaryStage').classList.toggle('hidden', !secondaryStream);
+  gateBtn.classList.toggle('hidden', !config.gateEnabled);
+
+  const testsResponse = await fetch('/api/audio-tests').catch(() => null);
+  const testsData = testsResponse?.ok ? await testsResponse.json() : { tests: [] };
+  const tests = Array.isArray(testsData.tests) ? testsData.tests : [];
+  for (const test of tests) {
+    const button = document.createElement('button');
+    button.dataset.test = test.id;
+    button.textContent = test.label;
+    audioTestsEl.insertBefore(button, stopAudioTestBtn);
+  }
+  audioTestsEl.classList.toggle('hidden', tests.length === 0);
+}
+
+function getClientId() {
+  const key = 'campainha-interfone-client-id';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+function versionParts(value) {
+  return String(value || '').split('.').map(part => Number.parseInt(part, 10) || 0);
+}
+function isVersionNewer(candidate, current) {
+  const next = versionParts(candidate);
+  const installed = versionParts(current);
+  const length = Math.max(next.length, installed.length);
+  for (let i = 0; i < length; i += 1) {
+    const a = next[i] || 0;
+    const b = installed[i] || 0;
+    if (a !== b) return a > b;
+  }
+  return false;
+}
+async function checkAppUpdate(force = false) {
+  if (!nativeAppVersion || nativeCallMode) return;
+  const now = Date.now();
+  if (!force && now - lastUpdateCheckAt < UPDATE_CHECK_MIN_INTERVAL_MS) return;
+  lastUpdateCheckAt = now;
+  try {
+    const res = await fetch('/app-update/manifest.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const manifest = await res.json();
+    if (manifest.apkUrl && isVersionNewer(manifest.version, nativeAppVersion)) {
+      appUpdateManifest = manifest;
+      appUpdateBtn.classList.remove('hidden');
+      appUpdateBtn.title = `Baixar Campainha ${manifest.version}`;
+      appUpdateBtn.setAttribute('aria-label', `Baixar atualização ${manifest.version}`);
+    } else {
+      appUpdateManifest = null;
+      appUpdateBtn.classList.add('hidden');
+    }
+  } catch (error) {
+    console.warn('app update check failed', error);
+  }
+}
+async function lockRequest(path) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ clientId, label: navigator.userAgent.slice(0, 60) }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.busy ? 'Microfone em uso' : (data.error || `HTTP ${res.status}`));
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+function setStatus(s) { statusEl.textContent = s; statusEl.setAttribute('aria-label', s); }
+function setSoundIcon() {
+  const muted = Boolean(video.muted);
+  soundBtn.querySelector('.icon-sound-on').classList.toggle('hidden', muted);
+  soundBtn.querySelector('.icon-sound-off').classList.toggle('hidden', !muted);
+  soundBtn.setAttribute('aria-label', muted ? 'Som da câmera desligado' : 'Som da câmera ligado');
+  soundBtn.title = muted ? 'Ligar som da câmera' : 'Desligar som da câmera';
+}
+function setTalkIcon(active) {
+  talkBtn.classList.toggle('active', active);
+  talkIcon.innerHTML = active ? MIC_ON_ICON : MIC_OFF_ICON;
+  talkBtn.setAttribute('aria-label', active ? 'Microfone ligado' : 'Microfone desligado');
+  talkBtn.title = active ? 'Toque para desligar o microfone' : 'Toque para ligar o microfone';
+}
+function setTalkSending(sending) {
+  talkBtn.classList.toggle('sending', sending);
+}
+function setTalkBusy(busy) {
+  if (talkPc) busy = false;
+  talkBtn.classList.toggle('busy', busy);
+  talkBtn.disabled = busy;
+  busyText.classList.toggle('visible', busy);
+  if (busy) {
+    talkBtn.setAttribute('aria-label', 'Microfone em uso por outra pessoa');
+    talkBtn.title = 'Microfone em uso';
+  } else if (!talkPc) {
+    talkBtn.disabled = false;
+    setTalkIcon(false);
+  }
+}
+async function refreshTalkLockStatus() {
+  if (talkPc) return;
+  try {
+    const res = await fetch(`/api/talk-lock/status?clientId=${encodeURIComponent(clientId)}`);
+    const data = await res.json();
+    setTalkBusy(Boolean(data.locked && !data.mine));
+  } catch (e) {
+    console.warn('talk lock status failed', e);
+  }
+}
+function startHeartbeat() {
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(async () => {
+    try {
+      await lockRequest('/api/talk-lock/heartbeat');
+    } catch (e) {
+      console.warn('talk lock lost', e);
+      stopTalk(false);
+    }
+  }, 5000);
+}
+function stopHeartbeat() {
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+}
+async function postOffer(pc, stream) {
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await new Promise(resolve => {
+    if (pc.iceGatheringState === 'complete') return resolve();
+    const onChange = () => { if (pc.iceGatheringState === 'complete') { pc.removeEventListener('icegatheringstatechange', onChange); resolve(); } };
+    pc.addEventListener('icegatheringstatechange', onChange);
+    setTimeout(resolve, 1500);
+  });
+  const res = await fetch(`/api/webrtc?src=${encodeURIComponent(stream)}`, { method:'POST', headers:{'content-type':'application/sdp'}, body: pc.localDescription.sdp });
+  const answer = await res.text();
+  if (!res.ok) throw new Error(`WebRTC ${res.status}: ${answer.slice(0,160)}`);
+  await pc.setRemoteDescription({ type:'answer', sdp: answer });
+}
+async function connectVideo() {
+  const stream = streamSel.value;
+  if (videoPc) videoPc.close();
+  videoPc = new RTCPeerConnection({ iceServers: [] });
+  videoPc.addTransceiver('video', { direction: 'recvonly' });
+  videoPc.addTransceiver('audio', { direction: 'recvonly' });
+  videoPc.ontrack = (ev) => { if (video.srcObject !== ev.streams[0]) video.srcObject = ev.streams[0]; };
+  videoPc.onconnectionstatechange = () => setStatus(videoPc.connectionState === 'connected' ? 'ao vivo' : videoPc.connectionState);
+  setStatus('conectando…');
+  await postOffer(videoPc, stream);
+  try {
+    video.muted = false;
+    await video.play();
+  } catch {
+    // Alguns navegadores bloqueiam autoplay com som até o primeiro toque.
+    video.muted = true;
+    try { await video.play(); } catch {}
+    setStatus('toque no som');
+  }
+  setSoundIcon();
+  if (!video.muted) setStatus('ao vivo');
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
+}
+async function connectSecondaryVideo() {
+  const stream = secondaryStream;
+  if (!stream) return;
+  if (secondaryPc) secondaryPc.close();
+  secondaryPc = new RTCPeerConnection({ iceServers: [] });
+  secondaryPc.addTransceiver('video', { direction: 'recvonly' });
+  secondaryPc.ontrack = (ev) => { if (secondaryVideo.srcObject !== ev.streams[0]) secondaryVideo.srcObject = ev.streams[0]; };
+  await postOffer(secondaryPc, stream);
+  secondaryVideo.muted = true;
+  try { await secondaryVideo.play(); } catch {}
+}
+async function startTalk() {
+  if (talkPc) return;
+  try {
+    await lockRequest('/api/talk-lock/acquire');
+  } catch (e) {
+    setTalkBusy(true);
+    return;
+  }
+  setTalkBusy(false);
+  setTalkIcon(true);
+  setStatus('conectando fala');
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+  } catch (e) {
+    await lockRequest('/api/talk-lock/release').catch(() => {});
+    throw e;
+  }
+  talkPc = new RTCPeerConnection({ iceServers: [] });
+  for (const track of micStream.getAudioTracks()) talkPc.addTrack(track, micStream);
+  talkPc.onconnectionstatechange = () => {
+    if (!talkPc) return;
+    const connected = talkPc.connectionState === 'connected';
+    setTalkSending(connected);
+    if (connected) startHeartbeat();
+    setStatus(connected ? 'falando…' : `fala: ${talkPc.connectionState}`);
+  };
+  try {
+    await postOffer(talkPc, streamSel.value);
+    const connected = talkPc.connectionState === 'connected';
+    setTalkSending(connected);
+    if (connected) startHeartbeat();
+    setStatus(connected ? 'falando…' : 'conectando fala');
+  }
+  catch (e) { stopTalk(); alert(e.message); }
+}
+function stopTalk(releaseLock = true) {
+  stopHeartbeat();
+  if (talkPc) { talkPc.close(); talkPc = null; }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  setTalkIcon(false);
+  setTalkSending(false);
+  setStatus(videoPc ? 'ao vivo' : 'microfone fechado');
+  if (releaseLock) lockRequest('/api/talk-lock/release').catch(() => {});
+  refreshTalkLockStatus();
+}
+function cancelBackgroundMicStop() {
+  if (backgroundMicTimer) clearTimeout(backgroundMicTimer);
+  backgroundMicTimer = null;
+}
+function scheduleBackgroundMicStop() {
+  cancelBackgroundMicStop();
+  backgroundMicTimer = setTimeout(() => {
+    backgroundMicTimer = null;
+    if (document.hidden && (talkPc || micStream)) stopTalk();
+  }, BACKGROUND_MIC_TIMEOUT_MS);
+}
+window.campainhaStopTalk = () => {
+  cancelBackgroundMicStop();
+  if (talkPc || micStream) stopTalk();
+};
+async function toggleGate() {
+  if (gateBusy) return;
+  gateBusy = true;
+  gateBtn.classList.add('warn');
+  setStatus('acionando portão…');
+  try {
+    const res = await fetch('/api/gate/toggle', { method: 'POST' });
+    if (!res.ok) throw new Error(await res.text());
+    setStatus('portão acionado');
+    setTimeout(() => setStatus('ao vivo'), 1800);
+  } catch (e) {
+    setStatus('erro portão');
+    alert('Não consegui acionar o portão: ' + e.message);
+  } finally {
+    gateBusy = false;
+    gateBtn.classList.remove('warn');
+  }
+}
+async function runAudioTest(id, label) {
+  const buttons = [...audioTestsEl.querySelectorAll('button')];
+  buttons.forEach(btn => btn.disabled = true);
+  setStatus(`teste ${label}`);
+  try {
+    const res = await fetch(`/api/audio-tests/${encodeURIComponent(id)}/play`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || data.body || `HTTP ${res.status}`);
+    setStatus(`${label} enviado`);
+    setTimeout(() => setStatus(videoPc ? 'ao vivo' : 'pronto'), 1600);
+  } catch (e) {
+    setStatus('erro teste');
+    alert(`Falha no teste ${label}: ${e.message}`);
+  } finally {
+    buttons.forEach(btn => btn.disabled = false);
+  }
+}
+async function stopAudioTest() {
+  setStatus('parando teste');
+  try {
+    const res = await fetch('/api/audio-tests/stop', { method: 'POST' });
+    if (!res.ok) throw new Error(await res.text());
+    setStatus('teste parado');
+    setTimeout(() => setStatus(videoPc ? 'ao vivo' : 'pronto'), 1000);
+  } catch (e) {
+    setStatus('erro parar');
+    alert('Falha ao parar teste: ' + e.message);
+  }
+}
+async function toggleTalk() {
+  if (talkPc) {
+    stopTalk();
+    return;
+  }
+  await startTalk();
+}
+function openStreamMenu() {
+  if (typeof streamSel.showPicker === 'function') {
+    streamSel.showPicker();
+  } else {
+    streamSel.focus();
+    streamSel.click();
+  }
+}
+reconnectBtn.onclick = () => {
+  connectVideo().catch(e => { console.error(e); setStatus('erro vídeo'); alert(e.message); });
+  connectSecondaryVideo().catch(e => { console.error(e); setStatus('erro vídeo secundário'); });
+};
+appUpdateBtn.onclick = () => {
+  if (appUpdateManifest?.apkUrl) location.href = appUpdateManifest.apkUrl;
+};
+streamSel.onchange = () => connectVideo().catch(e => { console.error(e); setStatus('erro vídeo'); alert(e.message); });
+soundBtn.onclick = async () => {
+  const nextMuted = !video.muted;
+  video.muted = nextMuted;
+  video.defaultMuted = nextMuted;
+  if (!nextMuted) video.volume = 1;
+  setSoundIcon();
+  try { await video.play(); } catch {}
+  setSoundIcon();
+};
+gateBtn.onclick = toggleGate;
+settingsBtn.onclick = openStreamMenu;
+talkBtn.onclick = () => toggleTalk().catch(e => { console.error(e); stopTalk(); alert(e.message); });
+audioTestsEl.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('button[data-test]');
+  if (!btn) return;
+  runAudioTest(btn.dataset.test, btn.textContent.trim()).catch(e => { console.error(e); alert(e.message); });
+});
+stopAudioTestBtn.onclick = () => stopAudioTest().catch(e => { console.error(e); alert(e.message); });
+window.addEventListener('beforeunload', () => {
+  cancelBackgroundMicStop();
+  if (talkPc) {
+    navigator.sendBeacon?.('/api/talk-lock/release', new Blob([JSON.stringify({ clientId })], { type: 'application/json' }));
+  }
+  stopTalk(false);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) scheduleBackgroundMicStop();
+  else {
+    cancelBackgroundMicStop();
+    checkAppUpdate();
+  }
+});
+window.addEventListener('pagehide', scheduleBackgroundMicStop);
+window.addEventListener('pageshow', cancelBackgroundMicStop);
+video.addEventListener('volumechange', setSoundIcon);
+setSoundIcon();
+setTalkIcon(false);
+setTalkSending(false);
+async function bootstrap() {
+  await loadRuntimeConfig();
+  await refreshTalkLockStatus();
+  statusTimer = setInterval(refreshTalkLockStatus, 4000);
+  await Promise.all([
+    connectVideo(),
+    connectSecondaryVideo(),
+    checkAppUpdate(true),
+  ]);
+}
+bootstrap().catch(e => { console.error(e); setStatus('configuration error'); alert(e.message); });
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').catch((e) => console.warn('service worker registration failed', e));
+  });
+}
+</script>
+</body>
+</html>

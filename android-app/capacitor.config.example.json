@@ -1,0 +1,17 @@
+{
+  "appId": "com.example.smartdoorbell",
+  "appName": "Smart Doorbell",
+  "webDir": "www",
+  "server": {
+    "allowNavigation": [
+      "doorbell.example.com",
+      "doorbell.local.example.com",
+      "auth.example.com"
+    ]
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  }
+}

@@ -1,0 +1,1 @@
+{"scripts":{"start":"node server.js","start:configured":"node --env-file=../.env server.js"},"dependencies":{"@fastify/static":"latest","fastify":"latest","undici":"^8.7.0"},"devDependencies":{}}

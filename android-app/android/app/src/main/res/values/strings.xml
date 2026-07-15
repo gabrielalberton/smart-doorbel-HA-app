@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+
+    <string name="package_name">com.example.smartdoorbell</string>
+    <string name="custom_url_scheme">com.example.smartdoorbell</string>
+    <string name="doorbell_channel_name">Doorbell calls</string>
+    <string name="doorbell_monitor_channel_name">Doorbell monitor</string>
+    <string name="incoming_call_title">Doorbell</string>
+    <string name="incoming_call_body">Someone rang the doorbell</string>
+</resources>

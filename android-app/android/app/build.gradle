@@ -1,0 +1,117 @@
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+import java.util.Properties
+import java.net.URI
+
+// Public defaults come from .env.example; private installation values come from the
+// gitignored repository-root .env or CI environment variables.
+def configProperties = new Properties()
+def exampleEnv = rootProject.file('../../.env.example')
+def privateEnv = rootProject.file('../../.env')
+if (exampleEnv.exists()) exampleEnv.withInputStream { configProperties.load(it) }
+if (privateEnv.exists()) privateEnv.withInputStream { configProperties.load(it) }
+def cleanConfigValue = { String value ->
+    if (value == null) return ''
+    def trimmed = value.trim()
+    if (trimmed.size() >= 2 && ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'")))) {
+        return trimmed.substring(1, trimmed.size() - 1)
+    }
+    return trimmed
+}
+def cfg = { String key, String fallback = '' ->
+    def fromEnvironment = System.getenv(key)
+    return cleanConfigValue((fromEnvironment != null && !fromEnvironment.isEmpty()) ? fromEnvironment : configProperties.getProperty(key, fallback))
+}
+def quoted = { String value -> '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"' }
+def applicationIdValue = cfg('ANDROID_APPLICATION_ID', 'com.example.smartdoorbell')
+def deepLinkSchemeValue = cfg('APP_DEEP_LINK_SCHEME', applicationIdValue)
+def baseHost = { String raw -> new URI(raw).host }
+
+def signingFile = System.getenv('ANDROID_KEYSTORE_FILE')
+def signingReady = signingFile && System.getenv('ANDROID_KEYSTORE_PASSWORD') && System.getenv('ANDROID_KEY_ALIAS') && System.getenv('ANDROID_KEY_PASSWORD')
+
+android {
+    namespace = "com.example.smartdoorbell"
+    compileSdk = rootProject.ext.compileSdkVersion
+
+    signingConfigs {
+        if (signingReady) {
+            release {
+                storeFile file(signingFile)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+
+    defaultConfig {
+        applicationId applicationIdValue
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode cfg('ANDROID_VERSION_CODE', '1').toInteger()
+        versionName cfg('ANDROID_VERSION_NAME', '0.1.0')
+        resValue "string", "app_name", cfg('APP_NAME', 'Smart Doorbell')
+        resValue "string", "title_activity_main", cfg('APP_NAME', 'Smart Doorbell')
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders = [
+            doorbellScheme: deepLinkSchemeValue,
+            publicDoorbellHost: baseHost(cfg('PUBLIC_BASE_URL', 'https://doorbell.example.com')),
+            localDoorbellHost: baseHost(cfg('LOCAL_BASE_URL', 'https://doorbell.local.example.com'))
+        ]
+        buildConfigField "String", "LOCAL_BASE_URL", quoted(cfg('LOCAL_BASE_URL', 'https://doorbell.local.example.com').replaceAll('/+$', ''))
+        buildConfigField "String", "PUBLIC_BASE_URL", quoted(cfg('PUBLIC_BASE_URL', 'https://doorbell.example.com').replaceAll('/+$', ''))
+        buildConfigField "String", "AUTH_HOST", quoted(cfg('AUTH_HOST', 'auth.example.com'))
+        buildConfigField "String", "DEEP_LINK_SCHEME", quoted(deepLinkSchemeValue)
+        buildConfigField "String", "GITHUB_RELEASE_REPO", quoted(cfg('GITHUB_RELEASE_REPO', ''))
+        buildConfigField "String", "HA_PACKAGE_PREFIX", quoted(cfg('HOME_ASSISTANT_PACKAGE_PREFIX', 'io.homeassistant.companion.'))
+        buildConfigField "String", "TRIGGER_TAG", quoted(cfg('DOORBELL_TRIGGER_TAG', 'smart_doorbell_trigger'))
+        buildConfigField "String", "TRIGGER_CHANNEL", quoted(cfg('DOORBELL_TRIGGER_CHANNEL', 'smart_doorbell_trigger'))
+        buildConfigField "String", "DOORBELL_TITLE", quoted(cfg('DOORBELL_NOTIFICATION_TITLE', 'Doorbell'))
+        aaptOptions {
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildFeatures { buildConfig = true }
+    kotlinOptions { jvmTarget = '21' }
+    buildTypes {
+        release {
+            if (signingReady) signingConfig signingConfigs.release
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir { dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs' }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "androidx.core:core-ktx:$androidxCoreVersion"
+    implementation platform('com.google.firebase:firebase-bom:34.6.0')
+    implementation 'com.google.firebase:firebase-messaging'
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) apply plugin: 'com.google.gms.google-services'
+} catch(Exception e) {
+    logger.info("google-services.json not found; Firebase push is disabled")
+}

@@ -1,0 +1,47 @@
+# Environment and local configuration
+.env
+.env.*
+!.env.example
+local.properties
+android-app/android/local.properties
+
+# Firebase / Google services
+google-services.json
+**/google-services.json
+
+# Signing material
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*.mobileprovision
+
+# Dependencies and generated output
+node_modules/
+**/node_modules/
+build/
+**/build/
+dist/
+**/dist/
+.gradle/
+**/.gradle/
+android-app/capacitor.config.json
+android-app/android/app/src/main/assets/
+
+# Binary releases
+*.apk
+*.aab
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+coverage/

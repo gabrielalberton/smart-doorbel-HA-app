@@ -1,0 +1,15 @@
+{
+  "name": "smart-doorbell-android",
+  "version": "0.9.0",
+  "private": true,
+  "scripts": {
+    "configure": "node scripts/configure.mjs",
+    "sync": "npm run configure && npx cap sync android",
+    "build:debug": "npm run sync && cd android && ./gradlew --no-daemon :app:assembleDebug --console=plain"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/core": "^8.4.1"
+  }
+}
