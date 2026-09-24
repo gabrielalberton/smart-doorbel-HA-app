@@ -45,7 +45,7 @@ class IncomingCallActivity : AppCompatActivity() {
     private val answeredSessionRunnable = Runnable {
         if (!isFinishing) finish()
     }
-    private val backgroundMicStopRunnable = Runnable { stopWebMicrophone() }
+    private var answered = false
 
     private val answerUrl: String
         get() = intent.getStringExtra(DoorbellConfig.EXTRA_OPEN_URL) ?: DoorbellConfig.DEFAULT_ATTEND_URL
@@ -71,25 +71,30 @@ class IncomingCallActivity : AppCompatActivity() {
         timeoutHandler.postDelayed(timeoutRunnable, DoorbellNotifier.CALL_TIMEOUT_MS)
     }
 
-    override fun onStart() {
-        super.onStart()
-        timeoutHandler.removeCallbacks(backgroundMicStopRunnable)
-    }
-
     override fun onResume() {
         super.onResume()
+        if (::webView.isInitialized) {
+            webView.onResume()
+            webView.evaluateJavascript("window.campainhaResumeMedia?.();", null)
+        }
         ApkDownloadSupport.resumePendingIfAllowed(this)
     }
 
+    override fun onPause() {
+        suspendWebMedia()
+        if (::webView.isInitialized) webView.onPause()
+        super.onPause()
+    }
+
     override fun onStop() {
-        timeoutHandler.removeCallbacks(backgroundMicStopRunnable)
-        timeoutHandler.postDelayed(backgroundMicStopRunnable, BACKGROUND_MIC_TIMEOUT_MS)
+        suspendWebMedia()
         super.onStop()
     }
 
     override fun onDestroy() {
         timeoutHandler.removeCallbacksAndMessages(null)
         runCatching {
+            suspendWebMedia()
             webView.stopLoading()
             webView.destroy()
         }
@@ -132,6 +137,9 @@ class IncomingCallActivity : AppCompatActivity() {
                 }
 
                 override fun onPageFinished(view: WebView, url: String?) {
+                    if (answered && url != null && DoorbellConfig.isDoorbellHost(Uri.parse(url).host)) {
+                        view.evaluateJavascript("window.campainhaAnswerCall?.();", null)
+                    }
                     if (!terminalLoadError) statusView.visibility = View.GONE
                 }
 
@@ -269,6 +277,7 @@ class IncomingCallActivity : AppCompatActivity() {
     }
 
     private fun answer() {
+        answered = true
         DoorbellNotifier.cancelIncomingCall(this)
         timeoutHandler.removeCallbacks(timeoutRunnable)
         actionsZone.visibility = View.GONE
@@ -291,6 +300,7 @@ class IncomingCallActivity : AppCompatActivity() {
                 }).catch(() => {});
                 document.body.classList.remove('native-call');
                 document.body.style.overflow = '';
+                window.campainhaAnswerCall?.();
                 window.scrollTo(0, 0);
                 """.trimIndent(),
                 null
@@ -334,14 +344,9 @@ class IncomingCallActivity : AppCompatActivity() {
         statusView.visibility = View.VISIBLE
     }
 
-    private fun stopWebMicrophone() {
+    private fun suspendWebMedia() {
         if (!::webView.isInitialized) return
-        webView.post {
-            webView.evaluateJavascript(
-                "if (window.campainhaStopTalk) window.campainhaStopTalk();",
-                null
-            )
-        }
+        webView.evaluateJavascript("window.campainhaSuspendMedia?.();", null)
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -355,6 +360,5 @@ class IncomingCallActivity : AppCompatActivity() {
 
     companion object {
         private const val ANSWERED_SESSION_TIMEOUT_MS = 5 * 60 * 1000L
-        private const val BACKGROUND_MIC_TIMEOUT_MS = 60_000L
     }
 }

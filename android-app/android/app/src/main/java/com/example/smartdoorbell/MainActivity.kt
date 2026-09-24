@@ -25,7 +25,6 @@ class MainActivity : BridgeActivity() {
     private var promptedFullScreenThisSession = false
     private var setupDialog: AlertDialog? = null
     private var activityResumed = false
-    private val backgroundMicStopRunnable = Runnable { stopWebMicrophone() }
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -46,26 +45,22 @@ class MainActivity : BridgeActivity() {
         if (configured) requestNotificationPermissionIfNeeded()
     }
 
-    override fun onStart() {
-        super.onStart()
-        mainHandler.removeCallbacks(backgroundMicStopRunnable)
-    }
-
     override fun onResume() {
         super.onResume()
         activityResumed = true
+        bridge?.webView?.evaluateJavascript("window.campainhaResumeMedia?.();", null)
         ApkDownloadSupport.resumePendingIfAllowed(this)
         if (DoorbellConfig.isConfigured()) scheduleSpecialAccessCheck()
     }
 
     override fun onPause() {
         activityResumed = false
+        bridge?.webView?.evaluateJavascript("window.campainhaSuspendMedia?.();", null)
         super.onPause()
     }
 
     override fun onStop() {
-        mainHandler.removeCallbacks(backgroundMicStopRunnable)
-        mainHandler.postDelayed(backgroundMicStopRunnable, BACKGROUND_MIC_TIMEOUT_MS)
+        bridge?.webView?.evaluateJavascript("window.campainhaSuspendMedia?.();", null)
         super.onStop()
     }
 
@@ -217,15 +212,6 @@ class MainActivity : BridgeActivity() {
         }
     }
 
-    private fun stopWebMicrophone() {
-        bridge?.webView?.post {
-            bridge?.webView?.evaluateJavascript(
-                "if (window.campainhaStopTalk) window.campainhaStopTalk();",
-                null
-            )
-        }
-    }
-
     private fun resolveOpenUrl(intent: Intent?): String? {
         intent ?: return null
         intent.getStringExtra(DoorbellConfig.EXTRA_OPEN_URL)?.let { return it }
@@ -246,6 +232,5 @@ class MainActivity : BridgeActivity() {
 
     companion object {
         private val SETUP_TOKEN = Any()
-        private const val BACKGROUND_MIC_TIMEOUT_MS = 60_000L
     }
 }

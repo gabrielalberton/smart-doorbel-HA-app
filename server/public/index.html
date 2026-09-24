@@ -64,7 +64,7 @@
   </style>
 </head>
 <body>
-  <div id="stage"><video id="video" autoplay playsinline></video></div>
+  <div id="stage"><video id="video" autoplay playsinline muted></video></div>
   <div id="secondaryStage"><video id="secondaryVideo" autoplay playsinline muted></video></div>
 
   <div id="status">conectando…</div>
@@ -136,8 +136,11 @@ let wakeLock = null;
 let gateBusy = false;
 let heartbeatTimer = null;
 let statusTimer = null;
-let backgroundMicTimer = null;
-const BACKGROUND_MIC_TIMEOUT_MS = 60_000;
+let mediaSuspended = document.hidden;
+let mediaGeneration = 0;
+let talkStarting = false;
+let audioEnabled = !nativeCallMode;
+let callAnswered = !nativeCallMode;
 let appUpdateManifest = null;
 let secondaryStream = '';
 let lastUpdateCheckAt = 0;
@@ -313,57 +316,94 @@ async function postOffer(pc, stream) {
   await pc.setRemoteDescription({ type:'answer', sdp: answer });
 }
 async function connectVideo() {
+  if (mediaSuspended) return;
+  const generation = mediaGeneration;
   const stream = streamSel.value;
   if (videoPc) videoPc.close();
-  videoPc = new RTCPeerConnection({ iceServers: [] });
-  videoPc.addTransceiver('video', { direction: 'recvonly' });
-  videoPc.addTransceiver('audio', { direction: 'recvonly' });
-  videoPc.ontrack = (ev) => { if (video.srcObject !== ev.streams[0]) video.srcObject = ev.streams[0]; };
-  videoPc.onconnectionstatechange = () => setStatus(videoPc.connectionState === 'connected' ? 'ao vivo' : videoPc.connectionState);
+  const pc = new RTCPeerConnection({ iceServers: [] });
+  videoPc = pc;
+  pc.addTransceiver('video', { direction: 'recvonly' });
+  pc.addTransceiver('audio', { direction: 'recvonly' });
+  pc.ontrack = (ev) => { if (!mediaSuspended && videoPc === pc && video.srcObject !== ev.streams[0]) video.srcObject = ev.streams[0]; };
+  pc.onconnectionstatechange = () => { if (videoPc === pc) setStatus(pc.connectionState === 'connected' ? 'ao vivo' : pc.connectionState); };
   setStatus('conectando…');
-  await postOffer(videoPc, stream);
+  try { await postOffer(pc, stream); }
+  catch (error) {
+    if (mediaSuspended || generation !== mediaGeneration || videoPc !== pc) return;
+    throw error;
+  }
+  if (mediaSuspended || generation !== mediaGeneration || videoPc !== pc) return;
   try {
-    video.muted = false;
+    video.muted = !audioEnabled;
     await video.play();
   } catch {
     // Alguns navegadores bloqueiam autoplay com som até o primeiro toque.
     video.muted = true;
+    audioEnabled = false;
     try { await video.play(); } catch {}
     setStatus('toque no som');
   }
   setSoundIcon();
+  if (mediaSuspended || generation !== mediaGeneration) return;
   if (!video.muted) setStatus('ao vivo');
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
 }
 async function connectSecondaryVideo() {
+  if (mediaSuspended) return;
+  const generation = mediaGeneration;
   const stream = secondaryStream;
   if (!stream) return;
   if (secondaryPc) secondaryPc.close();
-  secondaryPc = new RTCPeerConnection({ iceServers: [] });
-  secondaryPc.addTransceiver('video', { direction: 'recvonly' });
-  secondaryPc.ontrack = (ev) => { if (secondaryVideo.srcObject !== ev.streams[0]) secondaryVideo.srcObject = ev.streams[0]; };
-  await postOffer(secondaryPc, stream);
+  const pc = new RTCPeerConnection({ iceServers: [] });
+  secondaryPc = pc;
+  pc.addTransceiver('video', { direction: 'recvonly' });
+  pc.ontrack = (ev) => { if (!mediaSuspended && secondaryPc === pc && secondaryVideo.srcObject !== ev.streams[0]) secondaryVideo.srcObject = ev.streams[0]; };
+  try { await postOffer(pc, stream); }
+  catch (error) {
+    if (mediaSuspended || generation !== mediaGeneration || secondaryPc !== pc) return;
+    throw error;
+  }
+  if (mediaSuspended || generation !== mediaGeneration || secondaryPc !== pc) return;
   secondaryVideo.muted = true;
   try { await secondaryVideo.play(); } catch {}
 }
 async function startTalk() {
-  if (talkPc) return;
+  if (talkPc || talkStarting || mediaSuspended || document.hidden || (nativeCallMode && !callAnswered)) return;
+  talkStarting = true;
+  const generation = mediaGeneration;
   try {
     await lockRequest('/api/talk-lock/acquire');
   } catch (e) {
+    talkStarting = false;
     setTalkBusy(true);
+    return;
+  }
+  if (mediaSuspended || generation !== mediaGeneration) {
+    talkStarting = false;
+    if (!talkPc) lockRequest('/api/talk-lock/release').catch(() => {});
     return;
   }
   setTalkBusy(false);
   setTalkIcon(true);
   setStatus('conectando fala');
   try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+    if (mediaSuspended || generation !== mediaGeneration) {
+      stream.getTracks().forEach(track => track.stop());
+      if (!talkPc) lockRequest('/api/talk-lock/release').catch(() => {});
+      talkStarting = false;
+      setTalkIcon(false);
+      return;
+    }
+    micStream = stream;
   } catch (e) {
+    talkStarting = false;
     await lockRequest('/api/talk-lock/release').catch(() => {});
+    if (mediaSuspended || generation !== mediaGeneration) return;
     throw e;
   }
   talkPc = new RTCPeerConnection({ iceServers: [] });
+  talkStarting = false;
   for (const track of micStream.getAudioTracks()) talkPc.addTrack(track, micStream);
   talkPc.onconnectionstatechange = () => {
     if (!talkPc) return;
@@ -379,9 +419,14 @@ async function startTalk() {
     if (connected) startHeartbeat();
     setStatus(connected ? 'falando…' : 'conectando fala');
   }
-  catch (e) { stopTalk(); alert(e.message); }
+  catch (e) {
+    if (mediaSuspended || generation !== mediaGeneration) return;
+    stopTalk();
+    alert(e.message);
+  }
 }
 function stopTalk(releaseLock = true) {
+  talkStarting = false;
   stopHeartbeat();
   if (talkPc) { talkPc.close(); talkPc = null; }
   if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
@@ -391,20 +436,43 @@ function stopTalk(releaseLock = true) {
   if (releaseLock) lockRequest('/api/talk-lock/release').catch(() => {});
   refreshTalkLockStatus();
 }
-function cancelBackgroundMicStop() {
-  if (backgroundMicTimer) clearTimeout(backgroundMicTimer);
-  backgroundMicTimer = null;
+function suspendMedia() {
+  mediaSuspended = true;
+  mediaGeneration += 1;
+  audioEnabled = false;
+  video.muted = true;
+  secondaryVideo.muted = true;
+  stopTalk();
+  if (videoPc) { videoPc.close(); videoPc = null; }
+  if (secondaryPc) { secondaryPc.close(); secondaryPc = null; }
+  video.pause();
+  secondaryVideo.pause();
+  video.srcObject = null;
+  secondaryVideo.srcObject = null;
+  wakeLock?.release().catch(() => {});
+  wakeLock = null;
+  clearInterval(statusTimer);
+  statusTimer = null;
+  setSoundIcon();
 }
-function scheduleBackgroundMicStop() {
-  cancelBackgroundMicStop();
-  backgroundMicTimer = setTimeout(() => {
-    backgroundMicTimer = null;
-    if (document.hidden && (talkPc || micStream)) stopTalk();
-  }, BACKGROUND_MIC_TIMEOUT_MS);
+function resumeMedia() {
+  if (document.hidden || !mediaSuspended) return;
+  mediaSuspended = false;
+  audioEnabled = false;
+  connectVideo().catch(e => { if (!mediaSuspended) { console.error(e); setStatus('erro vídeo'); } });
+  connectSecondaryVideo().catch(e => { if (!mediaSuspended) console.error(e); });
+  if (!statusTimer) statusTimer = setInterval(refreshTalkLockStatus, 4000);
 }
-window.campainhaStopTalk = () => {
-  cancelBackgroundMicStop();
-  if (talkPc || micStream) stopTalk();
+window.campainhaStopTalk = () => { if (talkPc || micStream || talkStarting) stopTalk(); };
+window.campainhaSuspendMedia = suspendMedia;
+window.campainhaResumeMedia = resumeMedia;
+window.campainhaAnswerCall = () => {
+  if (mediaSuspended || document.hidden) return;
+  callAnswered = true;
+  audioEnabled = true;
+  video.muted = false;
+  video.play().catch(() => { video.muted = true; audioEnabled = false; });
+  setSoundIcon();
 };
 async function toggleGate() {
   if (gateBusy) return;
@@ -467,6 +535,7 @@ reconnectBtn.onclick = () => {
 streamSel.onchange = () => connectVideo().catch(e => { console.error(e); setStatus('erro vídeo'); alert(e.message); });
 soundBtn.onclick = async () => {
   const nextMuted = !video.muted;
+  audioEnabled = !nextMuted;
   video.muted = nextMuted;
   video.defaultMuted = nextMuted;
   if (!nextMuted) video.volume = 1;
@@ -490,21 +559,20 @@ audioTestsEl.addEventListener('click', (ev) => {
 });
 stopAudioTestBtn.onclick = () => stopAudioTest().catch(e => { console.error(e); alert(e.message); });
 window.addEventListener('beforeunload', () => {
-  cancelBackgroundMicStop();
   if (talkPc) {
     navigator.sendBeacon?.('/api/talk-lock/release', new Blob([JSON.stringify({ clientId })], { type: 'application/json' }));
   }
-  stopTalk(false);
+  suspendMedia();
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) scheduleBackgroundMicStop();
+  if (document.hidden) suspendMedia();
   else {
-    cancelBackgroundMicStop();
+    resumeMedia();
     checkAppUpdate();
   }
 });
-window.addEventListener('pagehide', scheduleBackgroundMicStop);
-window.addEventListener('pageshow', cancelBackgroundMicStop);
+window.addEventListener('pagehide', suspendMedia);
+window.addEventListener('pageshow', resumeMedia);
 video.addEventListener('volumechange', setSoundIcon);
 setSoundIcon();
 setTalkIcon(false);
@@ -512,14 +580,14 @@ setTalkSending(false);
 async function bootstrap() {
   await loadRuntimeConfig();
   await refreshTalkLockStatus();
-  statusTimer = setInterval(refreshTalkLockStatus, 4000);
+  if (!mediaSuspended) statusTimer = setInterval(refreshTalkLockStatus, 4000);
   await Promise.all([
     connectVideo(),
     connectSecondaryVideo(),
     checkAppUpdate(true),
   ]);
 }
-bootstrap().catch(e => { console.error(e); setStatus('configuration error'); alert(e.message); });
+bootstrap().catch(e => { if (!mediaSuspended) { console.error(e); setStatus('configuration error'); alert(e.message); } });
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js').catch((e) => console.warn('service worker registration failed', e));
