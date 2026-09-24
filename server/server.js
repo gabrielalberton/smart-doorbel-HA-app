@@ -136,38 +136,52 @@ app.get('/api/config', async () => ({
   talkLockTtlMs: TALK_LOCK_TTL_MS,
 }));
 
-async function githubReleaseManifest() {
+function versionParts(value) {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(value));
+  return match ? match.slice(1).map(Number) : null;
+}
+function isNewerVersion(candidate, current) {
+  const next = versionParts(candidate);
+  const old = versionParts(current);
+  if (!next) return false;
+  if (!old) return true;
+  for (let i = 0; i < 3; i += 1) {
+    if (next[i] !== old[i]) return next[i] > old[i];
+  }
+  return false;
+}
+async function githubUpdate() {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(GITHUB_RELEASE_REPO)) return null;
   if (githubReleaseCache && githubReleaseCache.expiresAt > Date.now()) return githubReleaseCache.value;
   const response = await request(`https://api.github.com/repos/${GITHUB_RELEASE_REPO}/releases/latest`, {
     headers: { accept: 'application/vnd.github+json', 'user-agent': 'smart-doorbell-update-checker' },
+    headersTimeout: 10000,
+    bodyTimeout: 10000,
   });
-  const body = await response.body.json();
-  if (response.statusCode !== 200) throw new Error(`GitHub releases returned ${response.statusCode}`);
-  const asset = (body.assets || []).find((item) => item.name?.toLowerCase().endsWith(GITHUB_RELEASE_ASSET_SUFFIX.toLowerCase()));
-  if (!asset) throw new Error(`No ${GITHUB_RELEASE_ASSET_SUFFIX} asset in latest release`);
-  const digest = typeof asset.digest === 'string' && asset.digest.startsWith('sha256:') ? asset.digest.slice(7) : '';
-  const value = {
-    available: true,
-    version: String(body.tag_name || '').replace(/^v/i, ''),
-    versionCode: 0,
-    apkUrl: asset.browser_download_url,
-    sha256: digest,
-    source: 'github-releases',
-  };
+  if (response.statusCode !== 200) {
+    await response.body.dump();
+    throw new Error(`GitHub release lookup HTTP ${response.statusCode}`);
+  }
+  const release = await response.body.json();
+  const version = String(release.tag_name || '').replace(/^v/i, '');
+  const asset = (release.assets || []).find(item => item.name === `smart-doorbell-${version}${GITHUB_RELEASE_ASSET_SUFFIX}`);
+  const digest = asset?.digest?.startsWith('sha256:') ? asset.digest.slice(7) : '';
+  const trustedUrl = asset?.browser_download_url?.startsWith(`https://github.com/${GITHUB_RELEASE_REPO}/releases/download/`);
+  const valid = isNewerVersion(version, APP_UPDATE_VERSION) && trustedUrl && /^[0-9a-f]{64}$/.test(digest) && asset.size > 0 && asset.size <= 32 * 1024 * 1024;
+  const value = valid ? { version, assetUrl: asset.browser_download_url, sha256: digest, size: asset.size } : null;
   githubReleaseCache = { value, expiresAt: Date.now() + 5 * 60_000 };
   return value;
 }
+async function currentUpdate() {
+  try { return await githubUpdate(); }
+  catch (error) { console.warn('GitHub update check failed:', error.message); return null; }
+}
 
 app.get('/app-update/manifest.json', async (_req, reply) => {
-  if (GITHUB_RELEASE_REPO) {
-    try {
-      reply.header('cache-control', 'no-store');
-      return await githubReleaseManifest();
-    } catch (error) {
-      app.log.warn(error);
-      return reply.code(502).send({ available: false, error: 'release lookup failed' });
-    }
+  const release = await currentUpdate();
+  if (release) {
+    reply.header('cache-control', 'no-store');
+    return { available: true, version: release.version, versionCode: 0, apkUrl: '/app-update/latest.apk', sha256: release.sha256, source: 'github-releases' };
   }
   if (!APP_UPDATE_VERSION || !APP_UPDATE_APK_PATH) {
     reply.code(503);
@@ -184,6 +198,27 @@ app.get('/app-update/manifest.json', async (_req, reply) => {
 });
 
 app.get('/app-update/latest.apk', async (_req, reply) => {
+  const release = await currentUpdate();
+  if (release) {
+    try {
+      const response = await fetch(release.assetUrl, {
+        headers: { 'user-agent': 'smart-doorbell-update-downloader' },
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!response.ok) throw new Error(`GitHub APK download HTTP ${response.status}`);
+      if (Number(response.headers.get('content-length') || 0) > 32 * 1024 * 1024) throw new Error('GitHub APK exceeds size limit');
+      const apk = Buffer.from(await response.arrayBuffer());
+      if (apk.length !== release.size || crypto.createHash('sha256').update(apk).digest('hex') !== release.sha256) throw new Error('GitHub APK checksum mismatch');
+      reply.header('cache-control', 'no-store');
+      reply.header('content-type', 'application/vnd.android.package-archive');
+      reply.header('content-length', String(apk.length));
+      reply.header('content-disposition', `attachment; filename="Campainha-${release.version}-${release.sha256.slice(0, 8)}.apk"`);
+      return reply.send(apk);
+    } catch (error) {
+      console.warn('GitHub APK download failed:', error.message);
+      return reply.code(502).send({ error: 'update unavailable' });
+    }
+  }
   if (!APP_UPDATE_APK_PATH) {
     return reply.code(404).send({ error: 'update not configured' });
   }

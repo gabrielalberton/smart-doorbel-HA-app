@@ -12,6 +12,8 @@ Yes. A public GitHub Release can be the canonical APK source:
 
 No GitHub API token is needed for reading releases from a public repository. The backend caches the latest-release response for five minutes.
 
+The Android WebView checks the server's `/app-update/manifest.json` on opening and when returning to the foreground (at most once every 15 minutes per page). It does not query GitHub directly. The server checks the latest GitHub Release for an APK named `smart-doorbell-X.Y.Z.apk`, validates its published SHA-256 digest, and serves it through `/app-update/latest.apk` so Android's DownloadManager can use the configured doorbell origin. If GitHub is unavailable or the Release is not newer than the locally configured version, the server uses its local APK and version. Keep the local APK/version current as the fallback.
+
 ## Preferred release path: build on the trusted NUC
 
 This deployment intentionally keeps the signing keystore off GitHub. The preferred flow is:
