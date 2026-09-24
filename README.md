@@ -4,9 +4,9 @@ Open-source Android + web intercom for a Home Assistant / Frigate / go2rtc doorb
 
 The repository contains:
 
-- `android-app/` — Capacitor/Kotlin Android app with lock-screen incoming-call UI, local/public route selection, Home Assistant notification trigger, optional FCM, talkback safety timeout and self-update support.
+- `android-app/` — Capacitor/Kotlin Android app with lock-screen incoming-call UI, local/public route selection, Home Assistant notification trigger, optional FCM, immediate background media shutdown and self-update support.
 - `server/` — Fastify web UI and server-side proxy for go2rtc WebRTC, Home Assistant actions, talkback locking and update discovery.
-- `.github/workflows/release-android.yml` — signed APK publishing to GitHub Releases.
+- `.github/workflows/release-android.yml` — optional, manually dispatched GitHub-hosted release workflow. This installation builds and signs on the NUC.
 
 ## Security model
 
@@ -42,15 +42,15 @@ The debug APK is generated under `android-app/android/app/build/outputs/apk/debu
 
 On first launch, enter only `https://your-doorbell-host.example` and the pairing password selected by the server administrator.
 
-See [Configuration](docs/CONFIGURATION.md) for every installation-specific value and [Releases](docs/RELEASES.md) for signing and automatic update setup.
+See [Configuration](docs/CONFIGURATION.md) for installation-specific values and [Releases and deployment](docs/RELEASES.md) for the complete release, NUC promotion, verification and rollback procedure. Agents must read [AGENTS.md](AGENTS.md) before changing or releasing this app; [CLAUDE.md](CLAUDE.md) points to the same instructions.
 
 For this deployment, releases are built, signed and verified on the trusted NUC and then uploaded with the GitHub CLI. GitHub-hosted signing is retained only as an optional manual workflow.
 
 ## Update flow
 
-When `GITHUB_RELEASE_REPO` is configured, the server's `/app-update/manifest.json` reads the latest public GitHub Release, selects its APK asset and returns the release version/download URL. The Android app only accepts release downloads from the configured repository (or the configured server's legacy `/app-update/latest.apk`).
+The Android app does **not** check GitHub itself. It loads the server's web UI with `app_version=<installed version>`. That UI asks the server's public `/app-update/manifest.json` for the available version, on opening and on returning to the foreground (at most every 15 minutes per loaded page). The server checks the latest GitHub Release for an APK named `smart-doorbell-X.Y.Z.apk` that is newer than its configured local fallback version. The server exposes the accepted APK at its own `/app-update/latest.apk`, verifies the GitHub asset's SHA-256 when proxying a newer release, and falls back to the configured local APK when GitHub has no newer usable release or the lookup fails. If a selected newer APK fails download or checksum verification, the download fails and must be repaired.
 
-The in-app download button appears only when the latest release tag is newer than the installed `versionName`.
+The in-app download button appears only if the manifest version is newer than the APK's `versionName`. A GitHub Release by itself is **not a completed deployment**: the live NUC server and web UI are built from a separate directory, and the fallback manifest/APK must be promoted and verified. In September 2026, publishing 1.0.4 while the live NUC still advertised 1.0.3 caused the update button to stay hidden. The [release checklist](docs/RELEASES.md) makes this verification mandatory.
 
 ## Home Assistant trigger
 
@@ -65,6 +65,7 @@ FCM is optional. To enable it, create your own Firebase Android app and add the 
 - Do not expose go2rtc/Frigate administrative APIs directly to the internet.
 - Configure public WebRTC candidates/TURN when off-LAN media is required.
 - Use a stable signing key from the first distributed build; Android rejects in-place updates signed by another key.
+- In the call preview (`native_call=1`), camera sound must remain muted until **Atender** is tapped. When the app goes into the background, stop microphone capture and both WebRTC receivers immediately; do not rely on a delayed JavaScript timer.
 
 ## License
 

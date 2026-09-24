@@ -71,7 +71,7 @@ Copy only the resulting `scrypt:...` value into `PAIRING_PASSWORD_HASH` in the p
 
 ## Optional server-hosted updater
 
-`APP_UPDATE_VERSION`, `APP_UPDATE_VERSION_CODE`, `APP_UPDATE_APK_PATH` and `APP_UPDATE_SHA256` support the legacy server-hosted APK path. When `GITHUB_RELEASE_REPO` is set, GitHub Releases takes precedence.
+`APP_UPDATE_VERSION`, `APP_UPDATE_VERSION_CODE`, `APP_UPDATE_APK_PATH` and `APP_UPDATE_SHA256` define the live local APK and fallback manifest. Keep all four aligned with the mounted, signed artifact at each release. When `GITHUB_RELEASE_REPO` is set, the server checks GitHub for a **newer** valid Release; if it finds one, it advertises and checksum-verifies that APK through the same-origin `/app-update/latest.apk` route. If GitHub is unavailable or has no newer usable asset, it advertises the local fallback. A stale fallback can make an installed app miss a GitHub release. See [Releases and deployment](RELEASES.md) for the full verification gate; publishing to GitHub alone does not update the live NUC service.
 
 ## Personalization audit
 
