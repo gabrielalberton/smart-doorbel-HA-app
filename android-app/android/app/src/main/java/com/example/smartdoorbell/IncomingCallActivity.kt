@@ -1,8 +1,10 @@
 package com.example.smartdoorbell
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -29,6 +31,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 
 class IncomingCallActivity : AppCompatActivity() {
     private lateinit var webView: WebView
@@ -46,6 +49,8 @@ class IncomingCallActivity : AppCompatActivity() {
         if (!isFinishing) finish()
     }
     private var answered = false
+    private var pipReceiver: BroadcastReceiver? = null
+    private val backgroundMediaStopRunnable = Runnable { suspendWebMedia() }
 
     private val answerUrl: String
         get() = intent.getStringExtra(DoorbellConfig.EXTRA_OPEN_URL) ?: DoorbellConfig.DEFAULT_ATTEND_URL
@@ -69,6 +74,13 @@ class IncomingCallActivity : AppCompatActivity() {
             webView.loadUrl(url)
         }
         timeoutHandler.postDelayed(timeoutRunnable, DoorbellNotifier.CALL_TIMEOUT_MS)
+        pipReceiver = DoorbellPip.registerActions(this) { if (::webView.isInitialized) webView else null }
+        DoorbellPip.update(this, autoEnter = false)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        timeoutHandler.removeCallbacks(backgroundMediaStopRunnable)
     }
 
     override fun onResume() {
@@ -80,18 +92,36 @@ class IncomingCallActivity : AppCompatActivity() {
         ApkDownloadSupport.resumePendingIfAllowed(this)
     }
 
-    override fun onPause() {
-        suspendWebMedia()
-        if (::webView.isInitialized) webView.onPause()
-        super.onPause()
-    }
-
+    // No onPause handling: entering PiP pauses the activity and the camera must keep playing.
+    // Pure background (not PiP): the microphone and streams are switched off after one minute.
     override fun onStop() {
-        suspendWebMedia()
+        timeoutHandler.removeCallbacks(backgroundMediaStopRunnable)
+        if (!DoorbellPip.isActive(this)) {
+            if (::webView.isInitialized) webView.onPause()
+            timeoutHandler.postDelayed(backgroundMediaStopRunnable, BACKGROUND_MIC_TIMEOUT_MS)
+        }
         super.onStop()
     }
 
+    // PiP only after Atender, so the silent preview never exposes the mic action.
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (answered) DoorbellPip.enter(this)
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (::statusView.isInitialized && isInPictureInPictureMode) statusView.visibility = View.GONE
+        if (::webView.isInitialized) DoorbellPip.notifyWebView(webView, isInPictureInPictureMode)
+        // PiP window closed by the user ends the call session; onDestroy suspends the media.
+        if (!isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            if (!isFinishing) finish()
+        }
+    }
+
     override fun onDestroy() {
+        pipReceiver?.let { runCatching { unregisterReceiver(it) } }
+        pipReceiver = null
         timeoutHandler.removeCallbacksAndMessages(null)
         runCatching {
             suspendWebMedia()
@@ -313,6 +343,7 @@ class IncomingCallActivity : AppCompatActivity() {
             }
         }
         timeoutHandler.postDelayed(answeredSessionRunnable, ANSWERED_SESSION_TIMEOUT_MS)
+        DoorbellPip.update(this, autoEnter = true)
     }
 
     private fun decline() {
@@ -360,5 +391,6 @@ class IncomingCallActivity : AppCompatActivity() {
 
     companion object {
         private const val ANSWERED_SESSION_TIMEOUT_MS = 5 * 60 * 1000L
+        private const val BACKGROUND_MIC_TIMEOUT_MS = 60_000L
     }
 }

@@ -23,16 +23,19 @@
 
         <activity
             android:name=".IncomingCallActivity"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:excludeFromRecents="true"
             android:exported="false"
             android:launchMode="singleTop"
             android:showWhenLocked="true"
+            android:supportsPictureInPicture="true"
             android:theme="@style/AppTheme.IncomingCall"
             android:turnScreenOn="true" />
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
+            android:supportsPictureInPicture="true"
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"

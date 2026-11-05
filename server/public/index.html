@@ -60,6 +60,12 @@
     body.native-call #stage, body.native-call #secondaryStage { width: 100%; margin: 0 0 4px; border-radius: 0; box-shadow: none; }
     body.native-call video { width: 100%; height: auto; object-fit: contain; }
     body.native-call .controls, body.native-call .settings-modal, body.native-call #status { display: none !important; }
+    /* Android Picture-in-Picture: only the doorbell camera, filling the floating window; a red frame shows the mic is open. */
+    body.pip-mode { min-height: 0; display: block; padding: 0; overflow: hidden; background: #000; }
+    body.pip-mode > :not(#stage) { display: none !important; }
+    body.pip-mode #stage { position: fixed; inset: 0; width: 100%; height: 100%; border-radius: 0; box-shadow: none; }
+    body.pip-mode video { height: 100%; }
+    body.pip-mode.pip-talking #stage::after { content: ""; position: absolute; inset: 0; border: 4px solid #df3030; pointer-events: none; }
     @media (max-width: 520px) { body { gap: 8px; } button { width: 52px; height: 52px; font-size: 23px; } button.primary { width: 68px; height: 68px; } }
   </style>
 </head>
@@ -256,6 +262,7 @@ function setSoundIcon() {
 }
 function setTalkIcon(active) {
   talkBtn.classList.toggle('active', active);
+  document.body.classList.toggle('pip-talking', active);
   talkIcon.innerHTML = active ? MIC_ON_ICON : MIC_OFF_ICON;
   talkBtn.setAttribute('aria-label', active ? 'Microfone ligado' : 'Microfone desligado');
   talkBtn.title = active ? 'Toque para desligar o microfone' : 'Toque para ligar o microfone';
@@ -474,7 +481,27 @@ window.campainhaAnswerCall = () => {
   video.play().catch(() => { video.muted = true; audioEnabled = false; });
   setSoundIcon();
 };
-async function toggleGate() {
+// Android Picture-in-Picture hooks. The PiP window only shows the doorbell camera
+// and its native actions (mic, gate) call these; media keeps running while in PiP.
+let isPipMode = false;
+function inPictureInPicture() { return isPipMode || Boolean(document.pictureInPictureElement); }
+window.campainhaSetPipMode = (inPip) => {
+  isPipMode = Boolean(inPip);
+  document.body.classList.toggle('pip-mode', isPipMode);
+  if (isPipMode) {
+    if (settingsModal.open) settingsModal.close();
+    window.scrollTo(0, 0);
+  } else if (document.hidden) {
+    // PiP window dismissed: the hidden event was skipped while in PiP.
+    suspendMedia();
+  }
+};
+window.campainhaToggleTalk = () => {
+  toggleTalk().catch(e => { console.error(e); stopTalk(); setStatus('erro microfone'); });
+};
+window.campainhaToggleGate = () => { toggleGate(true); };
+// silent: no alert(), which would block the page inside the PiP window.
+async function toggleGate(silent = false) {
   if (gateBusy) return;
   gateBusy = true;
   gateBtn.classList.add('warn');
@@ -486,7 +513,8 @@ async function toggleGate() {
     setTimeout(() => setStatus('ao vivo'), 1800);
   } catch (e) {
     setStatus('erro portão');
-    alert('Não consegui acionar o portão: ' + e.message);
+    if (silent) console.error('gate toggle failed', e);
+    else alert('Não consegui acionar o portão: ' + e.message);
   } finally {
     gateBusy = false;
     gateBtn.classList.remove('warn');
@@ -543,7 +571,7 @@ soundBtn.onclick = async () => {
   try { await video.play(); } catch {}
   setSoundIcon();
 };
-gateBtn.onclick = toggleGate;
+gateBtn.onclick = () => toggleGate();
 settingsBtn.onclick = () => {
   if (appUpdateManifest?.apkUrl) location.href = appUpdateManifest.apkUrl;
   else settingsModal.showModal();
@@ -565,8 +593,9 @@ window.addEventListener('beforeunload', () => {
   suspendMedia();
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) suspendMedia();
-  else {
+  if (document.hidden) {
+    if (!inPictureInPicture()) suspendMedia();
+  } else {
     resumeMedia();
     checkAppUpdate();
   }

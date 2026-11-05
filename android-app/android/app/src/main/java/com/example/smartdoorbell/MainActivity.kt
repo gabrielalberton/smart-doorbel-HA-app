@@ -3,8 +3,10 @@ package com.example.smartdoorbell
 import android.Manifest
 import android.app.AlertDialog
 import android.app.NotificationManager
+import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -17,6 +19,7 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import com.getcapacitor.BridgeActivity
 
 class MainActivity : BridgeActivity() {
@@ -25,6 +28,9 @@ class MainActivity : BridgeActivity() {
     private var promptedFullScreenThisSession = false
     private var setupDialog: AlertDialog? = null
     private var activityResumed = false
+    private var launchingOwnActivity = false
+    private var pipReceiver: BroadcastReceiver? = null
+    private val backgroundMediaStopRunnable = Runnable { suspendWebMedia() }
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -43,28 +49,67 @@ class MainActivity : BridgeActivity() {
             loadDoorbellUrl(DoorbellConfig.PUBLIC_BASE_URL + "/", "/")
         }
         if (configured) requestNotificationPermissionIfNeeded()
+        pipReceiver = DoorbellPip.registerActions(this) { bridge?.webView }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        mainHandler.removeCallbacks(backgroundMediaStopRunnable)
     }
 
     override fun onResume() {
         super.onResume()
         activityResumed = true
+        launchingOwnActivity = false
+        DoorbellPip.update(this, autoEnter = DoorbellConfig.isConfigured())
         bridge?.webView?.evaluateJavascript("window.campainhaResumeMedia?.();", null)
         ApkDownloadSupport.resumePendingIfAllowed(this)
         if (DoorbellConfig.isConfigured()) scheduleSpecialAccessCheck()
     }
 
+    // Media is not suspended here: entering PiP pauses the activity and the camera must keep playing.
     override fun onPause() {
         activityResumed = false
-        bridge?.webView?.evaluateJavascript("window.campainhaSuspendMedia?.();", null)
         super.onPause()
     }
 
+    // Pure background (not PiP): the microphone and streams are switched off after one minute.
     override fun onStop() {
-        bridge?.webView?.evaluateJavascript("window.campainhaSuspendMedia?.();", null)
+        mainHandler.removeCallbacks(backgroundMediaStopRunnable)
+        if (!DoorbellPip.isActive(this)) {
+            mainHandler.postDelayed(backgroundMediaStopRunnable, BACKGROUND_MIC_TIMEOUT_MS)
+        }
         super.onStop()
     }
 
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (DoorbellConfig.isConfigured() && !launchingOwnActivity && setupDialog?.isShowing != true) {
+            DoorbellPip.enter(this)
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        DoorbellPip.notifyWebView(bridge?.webView, isInPictureInPictureMode)
+        // PiP window closed by the user: the activity is already stopped, so start the background rule now.
+        if (!isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            mainHandler.removeCallbacks(backgroundMediaStopRunnable)
+            mainHandler.postDelayed(backgroundMediaStopRunnable, BACKGROUND_MIC_TIMEOUT_MS)
+        }
+    }
+
+    // Settings screens and the APK installer opened by the app must not shrink it into PiP.
+    @Deprecated("Deprecated in Java")
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        launchingOwnActivity = true
+        @Suppress("DEPRECATION")
+        super.startActivityForResult(intent, requestCode, options)
+    }
+
     override fun onDestroy() {
+        pipReceiver?.let { runCatching { unregisterReceiver(it) } }
+        pipReceiver = null
         mainHandler.removeCallbacksAndMessages(null)
         setupDialog?.dismiss()
         setupDialog = null
@@ -212,6 +257,10 @@ class MainActivity : BridgeActivity() {
         }
     }
 
+    private fun suspendWebMedia() {
+        bridge?.webView?.evaluateJavascript("window.campainhaSuspendMedia?.();", null)
+    }
+
     private fun resolveOpenUrl(intent: Intent?): String? {
         intent ?: return null
         intent.getStringExtra(DoorbellConfig.EXTRA_OPEN_URL)?.let { return it }
@@ -232,5 +281,6 @@ class MainActivity : BridgeActivity() {
 
     companion object {
         private val SETUP_TOKEN = Any()
+        private const val BACKGROUND_MIC_TIMEOUT_MS = 60_000L
     }
 }
