@@ -31,7 +31,7 @@ The public `/app-update/` route bypasses Authelia so Android's DownloadManager c
 | Live Compose | `/home/gabriel/Área de trabalho/compose-migration/15-campainha-interfone.yml` |
 | Mounted fallback APK | `/home/gabriel/projects/campainha-interfone-apk/dist/campainha-interfone-latest.apk` |
 | Running container | `campainha_interfone` |
-| Public app and update origin | `https://campainha.alberton.work` |
+| Public app and update origin | `PUBLIC_BASE_URL` in the live Compose file (referred to below as `$PUBLIC_ORIGIN`) |
 | Local credentials | `/etc/homelab/campainha-interfone.env`; never display or copy into the repository |
 
 The live NUC app has installation-specific stream configuration and authentication routing. Compare its `server.js` and `public/index.html` with this repo before promoting a change. Copy only intended behavior; do not replace the live service wholesale with generic defaults. `git push`, a tag and a GitHub Release do not rebuild this container or update Compose variables. Never use `git reset --hard` or overwrite uncommitted NUC work.
@@ -60,9 +60,11 @@ JAVA_HOME=/home/gabriel/.local/jdks/temurin-21.0.11 \
 ANDROID_HOME=/home/gabriel/android-sdk \
 ANDROID_APPLICATION_ID=work.alberton.campainha \
 APP_DEEP_LINK_SCHEME=work.alberton.campainha APP_NAME=Campainha \
-DEFAULT_PAIRING_ENDPOINT=https://campainha.alberton.work \
+DEFAULT_PAIRING_ENDPOINT="$PUBLIC_ORIGIN" \
 ./gradlew --no-daemon :app:assembleDebug --console=plain
 ```
+
+Build **two variants** of the same version and versionCode. The NUC-served APK sets `DEFAULT_PAIRING_ENDPOINT` to the live public origin so the first-run screen does not ask for it on Wi-Fi. The GitHub asset is built with `DEFAULT_PAIRING_ENDPOINT` unset, so the public APK carries no household endpoint; check with `unzip -p <apk> 'classes*.dex' | grep -a -c <host>` (expect 0). Both must share package ID, version and signing certificate; only the NUC variant goes to the mounted fallback path.
 
 Inspect the APK with Android build tools (`aapt dump badging`, `apksigner verify --print-certs`) and compare its certificate with the currently distributed APK. Compute SHA-256 and verify ZIP/APK structure. Keep package ID and signing identity stable; `versionCode` must rise. Copy the verified APK to release staging as `smart-doorbell-X.Y.Z.apk` and create a matching `.sha256` file. Verify `sha256sum -c`.
 
@@ -96,9 +98,9 @@ Confirm container process stability and recent logs. Do not treat `Up` or a sing
 
 Perform these against the public origin after the live container is recreated:
 
-1. `GET https://campainha.alberton.work/app-update/manifest.json` returns intended `version: X.Y.Z` and built APK SHA-256. It must not still announce the old version. The URL is public without Authelia. With the local fallback at the same version as the Release, the manifest may omit `source: github-releases`; do not mistake that for a failed deployment. Verify the GitHub asset and public APK bytes separately.
-2. `GET https://campainha.alberton.work/app-update/latest.apk` returns HTTP 200 and an APK whose SHA-256 matches both the local build and published GitHub asset. Check content type and size. HEAD alone does not verify bytes.
-3. `HEAD https://campainha.alberton.work/` still redirects to `auth.alberton.work`; update stays narrowly exempt.
+1. `GET $PUBLIC_ORIGIN/app-update/manifest.json` returns intended `version: X.Y.Z` and built APK SHA-256. It must not still announce the old version. The URL is public without Authelia. With the local fallback at the same version as the Release, the manifest may omit `source: github-releases`; do not mistake that for a failed deployment. Verify the GitHub asset and public APK bytes separately.
+2. `GET $PUBLIC_ORIGIN/app-update/latest.apk` returns HTTP 200 and an APK whose SHA-256 matches the NUC variant (the GitHub asset is the endpoint-free variant and differs by design). Check content type and size. HEAD alone does not verify bytes.
+3. `HEAD $PUBLIC_ORIGIN/` still redirects to the Authelia host; update stays narrowly exempt.
 4. Confirm a WebView loaded as `/?app_version=<previous version>` displays **Baixar atualização X.Y.Z** in settings. Test the phone when available. The UI throttles checks for 15 minutes within one page; fully restart it for a fresh test.
 5. Confirm Android accepts the APK as an update on a real device when available. For media releases, check preview silence, answer audio and immediate background shutdown of microphone/streams.
 
