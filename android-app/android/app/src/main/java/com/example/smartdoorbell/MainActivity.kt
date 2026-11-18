@@ -7,20 +7,25 @@ import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
+import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import com.getcapacitor.BridgeActivity
+import java.net.URLEncoder
 
 class MainActivity : BridgeActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -133,9 +138,31 @@ class MainActivity : BridgeActivity() {
     private fun showPairingDialog() {
         if (isFinishing || isDestroyed || setupDialog?.isShowing == true) return
         val padding = (20 * resources.displayMetrics.density).toInt()
+        val defaultEndpoint = PairingConfig.defaultEndpoint
+        // On Wi-Fi the build's default server is almost certainly the right one, so
+        // the address is hidden behind a link instead of being asked every time.
+        val hideEndpoint = defaultEndpoint.isNotBlank() && isOnWifi()
         val endpointInput = EditText(this).apply {
             hint = "https://campainha.exemplo.com"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine(true)
+            setText(defaultEndpoint)
+            visibility = if (hideEndpoint) View.GONE else View.VISIBLE
+        }
+        val changeServerLink = TextView(this).apply {
+            text = "Servidor: ${DoorbellConfig.hostOf(defaultEndpoint).orEmpty()} · trocar"
+            setPadding(0, padding / 2, 0, padding / 2)
+            setTextColor(currentTextColorAccent())
+            visibility = if (hideEndpoint) View.VISIBLE else View.GONE
+            setOnClickListener {
+                visibility = View.GONE
+                endpointInput.visibility = View.VISIBLE
+                endpointInput.requestFocus()
+            }
+        }
+        val nameInput = EditText(this).apply {
+            hint = "Seu nome (ex.: Gabriel)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
             setSingleLine(true)
         }
         val passwordInput = EditText(this).apply {
@@ -146,39 +173,85 @@ class MainActivity : BridgeActivity() {
         val form = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(padding, 0, padding, 0)
-            addView(endpointInput, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(passwordInput, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            for (view in listOf(changeServerLink, endpointInput, nameInput, passwordInput)) {
+                addView(view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
         }
         setupDialog = AlertDialog.Builder(this)
             .setTitle("Conectar à campainha")
-            .setMessage("Informe o endpoint HTTPS e a senha configurada no servidor.")
+            .setMessage(
+                if (hideEndpoint) "Informe seu nome e a senha da campainha."
+                else "Informe o endpoint HTTPS, seu nome e a senha configurada no servidor."
+            )
             .setView(form)
             .setCancelable(false)
             .setPositiveButton("Conectar", null)
             .create()
         setupDialog?.setOnShowListener {
             setupDialog?.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener { button ->
+                val name = nameInput.text.toString().trim()
+                if (name.isEmpty()) {
+                    nameInput.error = "Informe seu nome"
+                    nameInput.requestFocus()
+                    return@setOnClickListener
+                }
                 button.isEnabled = false
-                PairingConfig.pairAsync(endpointInput.text.toString(), passwordInput.text.toString()) { result ->
+                PairingConfig.pairAsync(endpointInput.text.toString(), passwordInput.text.toString(), name) { result ->
                     button.isEnabled = true
-                    result.onSuccess { config ->
-                        PairingConfig.save(this, config)
-                        DoorbellConfig.apply(config)
+                    result.onSuccess { pairing ->
+                        PairingConfig.save(this, pairing.config)
+                        DoorbellConfig.apply(pairing.config)
                         passwordInput.text?.clear()
                         setupDialog?.dismiss()
                         setupDialog = null
-                        Toast.makeText(this, "Campainha conectada", Toast.LENGTH_SHORT).show()
                         requestNotificationPermissionIfNeeded()
-                        loadDoorbellUrl(DoorbellConfig.PUBLIC_BASE_URL + "/", "/")
+                        val enrollment = pairing.enrollment
+                        if (enrollment != null) {
+                            Toast.makeText(this, "Campainha conectada. Acesso fora de casa ativado.", Toast.LENGTH_LONG).show()
+                            postDeviceEnrollment(enrollment)
+                        } else {
+                            Toast.makeText(
+                                this,
+                                "Campainha conectada. Para abrir fora de casa sem login, ative em casa nas Configurações.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            loadDoorbellUrl(DoorbellConfig.PUBLIC_BASE_URL + "/", "/")
+                        }
                     }.onFailure { error ->
                         passwordInput.text?.clear()
                         passwordInput.requestFocus()
+                        // A network failure may mean the default server is wrong; let the user see it.
+                        if (endpointInput.visibility != View.VISIBLE && error !is SecurityException) {
+                            changeServerLink.visibility = View.GONE
+                            endpointInput.visibility = View.VISIBLE
+                        }
                         Toast.makeText(this, error.message ?: "Falha no pareamento", Toast.LENGTH_LONG).show()
                     }
                 }
             }
         }
         setupDialog?.show()
+    }
+
+    /** Top-level POST so the server's device cookie lands in the WebView's cookie jar. */
+    private fun postDeviceEnrollment(enrollment: DeviceEnrollment) {
+        val next = DoorbellConfig.withAppVersion("/")
+        val body = "code=${URLEncoder.encode(enrollment.code, "UTF-8")}&next=${URLEncoder.encode(next, "UTF-8")}"
+        bridge?.webView?.post {
+            bridge?.webView?.postUrl(enrollment.enrollUrl, body.toByteArray(Charsets.UTF_8))
+        }
+    }
+
+    private fun isOnWifi(): Boolean {
+        val connectivity = getSystemService(ConnectivityManager::class.java) ?: return false
+        val capabilities = connectivity.getNetworkCapabilities(connectivity.activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    private fun currentTextColorAccent(): Int {
+        val value = android.util.TypedValue()
+        theme.resolveAttribute(android.R.attr.colorAccent, value, true)
+        return value.data
     }
 
     private fun scheduleSpecialAccessCheck() {

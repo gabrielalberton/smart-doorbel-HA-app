@@ -1,6 +1,8 @@
 # Installation-specific configuration
 
-Copy `.env.example` to the ignored `.env`. The distributed APK is endpoint-independent: on first launch the user supplies only the server's HTTPS endpoint and pairing password. The password is verified but never saved by the app.
+Copy `.env.example` to the ignored `.env`. The distributed APK is endpoint-independent: on first launch the user supplies the server's HTTPS endpoint, their name and the pairing password. The password is verified but never saved by the app.
+
+A build may set `DEFAULT_PAIRING_ENDPOINT` to prefill the endpoint; on Wi-Fi the field is then hidden behind a "trocar" link. If the server also offers device keys (`POST /api/device/enroll-code` on the trusted local origin) and the phone reaches the local origin, pairing activates the device key in the same step, named after the user; elsewhere the phone is only paired.
 
 ## Values fixed in the universal APK
 

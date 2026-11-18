@@ -60,6 +60,7 @@ JAVA_HOME=/home/gabriel/.local/jdks/temurin-21.0.11 \
 ANDROID_HOME=/home/gabriel/android-sdk \
 ANDROID_APPLICATION_ID=work.alberton.campainha \
 APP_DEEP_LINK_SCHEME=work.alberton.campainha APP_NAME=Campainha \
+DEFAULT_PAIRING_ENDPOINT=https://campainha.alberton.work \
 ./gradlew --no-daemon :app:assembleDebug --console=plain
 ```
 

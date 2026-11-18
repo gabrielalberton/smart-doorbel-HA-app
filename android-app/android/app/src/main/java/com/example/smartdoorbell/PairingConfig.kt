@@ -19,6 +19,11 @@ data class RuntimeDoorbellConfig(
     val doorbellTitle: String
 )
 
+/** Single-use code that turns into this phone's device key once the WebView posts it. */
+data class DeviceEnrollment(val enrollUrl: String, val code: String)
+
+data class PairingResult(val config: RuntimeDoorbellConfig, val enrollment: DeviceEnrollment?)
+
 object PairingConfig {
     private const val PREFS = "smart_doorbell_pairing"
     private const val PUBLIC_URL = "public_base_url"
@@ -58,11 +63,51 @@ object PairingConfig {
             .apply()
     }
 
-    fun pairAsync(endpoint: String, password: String, callback: (Result<RuntimeDoorbellConfig>) -> Unit) {
+    /** Build-time default endpoint (empty in the generic build). */
+    val defaultEndpoint: String get() = normalizeOptionalHttpsBaseUrl(BuildConfig.DEFAULT_PAIRING_ENDPOINT)
+
+    fun pairAsync(
+        endpoint: String,
+        password: String,
+        deviceName: String,
+        callback: (Result<PairingResult>) -> Unit
+    ) {
         Thread {
-            val result = runCatching { pair(endpoint, password) }
+            val result = runCatching {
+                val config = pair(endpoint, password)
+                // Activation is only accepted on the home network, so outside it the
+                // phone stays paired and can be activated later from the settings.
+                val enrollment = runCatching { requestEnrollment(config, password, deviceName) }.getOrNull()
+                PairingResult(config, enrollment)
+            }
             Handler(Looper.getMainLooper()).post { callback(result) }
         }.start()
+    }
+
+    private fun requestEnrollment(config: RuntimeDoorbellConfig, password: String, deviceName: String): DeviceEnrollment? {
+        if (config.localBaseUrl.isBlank()) return null
+        val connection = (URL("${config.localBaseUrl}/api/device/enroll-code").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 2_500
+            readTimeout = 5_000
+            doOutput = true
+            instanceFollowRedirects = false
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+        }
+        try {
+            val body = JSONObject().put("password", password).put("name", deviceName).toString().toByteArray(Charsets.UTF_8)
+            connection.outputStream.use { it.write(body) }
+            if (connection.responseCode !in 200..299) return null
+            val response = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+            val enrollUrl = response.optString("enrollUrl")
+            val code = response.optString("code")
+            // The code is posted from the WebView, so it may only go to the paired public origin.
+            if (!response.optBoolean("ok") || code.isBlank() || !enrollUrl.startsWith("${config.publicBaseUrl}/")) return null
+            return DeviceEnrollment(enrollUrl, code)
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun pair(endpoint: String, password: String): RuntimeDoorbellConfig {

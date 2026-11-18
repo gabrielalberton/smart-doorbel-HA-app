@@ -55,6 +55,7 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders = [doorbellScheme: deepLinkSchemeValue]
         buildConfigField "String", "DEEP_LINK_SCHEME", quoted(deepLinkSchemeValue)
+        buildConfigField "String", "DEFAULT_PAIRING_ENDPOINT", quoted(cfg('DEFAULT_PAIRING_ENDPOINT', ''))
         buildConfigField "String", "GITHUB_RELEASE_REPO", quoted(cfg('GITHUB_RELEASE_REPO', ''))
         buildConfigField "String", "HA_PACKAGE_PREFIX", quoted(cfg('HOME_ASSISTANT_PACKAGE_PREFIX', 'io.homeassistant.companion.'))
         buildConfigField "String", "TRIGGER_TAG", quoted(cfg('DOORBELL_TRIGGER_TAG', 'smart_doorbell_trigger'))
