@@ -143,47 +143,36 @@ let gateBusy = false;
 let heartbeatTimer = null;
 let statusTimer = null;
 let mediaSuspended = document.hidden;
-// Android app 1.0.7+ (window.CampainhaAudio): while the camera sound or the microphone
-// is on, the app holds the phone in call mode on the loudspeaker (never Bluetooth,
-// headset or earpiece), so the microphone's echo canceller covers the camera audio
-// and the visitor does not hear their own voice. false switches it off without an APK.
-const NATIVE_SPEAKER_ROUTING = true;
-let nativeAudioKey = '';
-let nativeRouteAck = null; // what to do with the app's answer to the last setActive(true)
+// Android app (window.CampainhaAudio): while the camera sound or the microphone is on,
+// the app holds the phone in call mode on the loudspeaker (never Bluetooth, headset or
+// earpiece). Camera audio opened in that mode is a call stream, so it plays on the
+// loudspeaker and the microphone's echo canceller covers it: the visitor does not hear
+// their own voice. The app calls campainhaAudioRouteChanged when it enters or restores
+// the mode; the page reopens the camera audio then and whenever the sound is turned on.
+let nativeAudioState = { sound: false, talk: false };
 function syncNativeAudio() {
   const bridge = window.CampainhaAudio;
-  if (!NATIVE_SPEAKER_ROUTING || !bridge) return;
-  const talk = talkBtn.classList.contains('active');
+  if (!bridge) return;
   const sound = !video.muted && !mediaSuspended;
-  const key = `${sound}|${talk}`;
-  if (key === nativeAudioKey) return;
-  const [prevSound, prevTalk] = nativeAudioKey.split('|').map(v => v === 'true');
-  nativeAudioKey = key;
-  const active = sound || talk;
-  // Reopen the camera audio only when it may still be a media stream: the call mode
-  // was just entered or the sound was just turned on. A mic toggle with the sound on
-  // keeps the call mode held, so the audio keeps playing and is not reopened.
-  if (active) nativeRouteAck = (!(prevSound || prevTalk) || (sound && !prevSound)) ? 'reopen' : 'skip';
-  try { bridge.setActive(active); } catch (e) { console.warn('native audio', e); }
+  const talk = talkBtn.classList.contains('active');
+  const prev = nativeAudioState;
+  if (sound === prev.sound && talk === prev.talk) return;
+  nativeAudioState = { sound, talk };
+  bridge.setActive(sound || talk);
+  if (sound && !prev.sound) reopenCameraAudio();
 }
-let cameraAudioReattachTimer = null;
-// The app switched the phone to call mode on the loudspeaker: reopen the camera
-// audio so it becomes a call stream (loudspeaker route, covered by the echo canceller).
-// Unsolicited calls (the app had to restore the call mode) always reopen it.
-window.campainhaAudioRouteChanged = () => {
-  const ack = nativeRouteAck;
-  nativeRouteAck = null;
-  if (ack === 'skip') return;
-  clearTimeout(cameraAudioReattachTimer);
-  cameraAudioReattachTimer = setTimeout(() => {
-    cameraAudioReattachTimer = null;
+let reopenCameraAudioTimer = null;
+function reopenCameraAudio() {
+  clearTimeout(reopenCameraAudioTimer);
+  reopenCameraAudioTimer = setTimeout(() => {
     if (mediaSuspended || video.muted || !video.srcObject) return;
     const stream = video.srcObject;
     video.srcObject = null;
     video.srcObject = stream;
     video.play().catch(() => {});
   }, 150);
-};
+}
+window.campainhaAudioRouteChanged = reopenCameraAudio;
 let mediaGeneration = 0;
 let talkStarting = false;
 let audioEnabled = !nativeCallMode;
