@@ -97,7 +97,10 @@ class IncomingCallActivity : AppCompatActivity() {
     override fun onStop() {
         timeoutHandler.removeCallbacks(backgroundMediaStopRunnable)
         if (!DoorbellPip.isActive(this)) {
-            if (::webView.isInitialized) webView.onPause()
+            if (::webView.isInitialized) {
+                DoorbellAudio.release(this, webView)
+                webView.onPause()
+            }
             timeoutHandler.postDelayed(backgroundMediaStopRunnable, BACKGROUND_MIC_TIMEOUT_MS)
         }
         super.onStop()
@@ -124,6 +127,7 @@ class IncomingCallActivity : AppCompatActivity() {
         pipReceiver = null
         timeoutHandler.removeCallbacksAndMessages(null)
         runCatching {
+            DoorbellAudio.release(this, webView)
             suspendWebMedia()
             webView.stopLoading()
             webView.destroy()
@@ -223,6 +227,7 @@ class IncomingCallActivity : AppCompatActivity() {
             CookieManager.getInstance().setAcceptCookie(true)
         }
         ApkDownloadSupport.install(this, webView)
+        DoorbellAudio.install(this, webView)
 
         statusView = TextView(this).apply {
             text = "Preparando câmeras…"

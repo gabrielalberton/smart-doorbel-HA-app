@@ -143,6 +143,36 @@ let gateBusy = false;
 let heartbeatTimer = null;
 let statusTimer = null;
 let mediaSuspended = document.hidden;
+// Android app 1.0.7+ (window.CampainhaAudio): while the camera sound or the microphone
+// is on, the app holds the phone in call mode on the loudspeaker (never Bluetooth,
+// headset or earpiece), so the microphone's echo canceller covers the camera audio
+// and the visitor does not hear their own voice. false switches it off without an APK.
+const NATIVE_SPEAKER_ROUTING = true;
+let nativeAudioKey = '';
+function syncNativeAudio() {
+  const bridge = window.CampainhaAudio;
+  if (!NATIVE_SPEAKER_ROUTING || !bridge) return;
+  const talk = talkBtn.classList.contains('active');
+  const sound = !video.muted && !mediaSuspended;
+  const key = `${sound}|${talk}`;
+  if (key === nativeAudioKey) return;
+  nativeAudioKey = key;
+  try { bridge.setActive(sound || talk); } catch (e) { console.warn('native audio', e); }
+}
+let cameraAudioReattachTimer = null;
+// The app switched the phone to call mode on the loudspeaker: reopen the camera
+// audio so it becomes a call stream (loudspeaker route, covered by the echo canceller).
+window.campainhaAudioRouteChanged = () => {
+  clearTimeout(cameraAudioReattachTimer);
+  cameraAudioReattachTimer = setTimeout(() => {
+    cameraAudioReattachTimer = null;
+    if (mediaSuspended || video.muted || !video.srcObject) return;
+    const stream = video.srcObject;
+    video.srcObject = null;
+    video.srcObject = stream;
+    video.play().catch(() => {});
+  }, 150);
+};
 let mediaGeneration = 0;
 let talkStarting = false;
 let audioEnabled = !nativeCallMode;
@@ -259,6 +289,7 @@ function setSoundIcon() {
   soundBtn.querySelector('.icon-sound-off').classList.toggle('hidden', !muted);
   soundBtn.setAttribute('aria-label', muted ? 'Som da câmera desligado' : 'Som da câmera ligado');
   soundBtn.title = muted ? 'Ligar som da câmera' : 'Desligar som da câmera';
+  syncNativeAudio();
 }
 function setTalkIcon(active) {
   talkBtn.classList.toggle('active', active);
@@ -266,6 +297,7 @@ function setTalkIcon(active) {
   talkIcon.innerHTML = active ? MIC_ON_ICON : MIC_OFF_ICON;
   talkBtn.setAttribute('aria-label', active ? 'Microfone ligado' : 'Microfone desligado');
   talkBtn.title = active ? 'Toque para desligar o microfone' : 'Toque para ligar o microfone';
+  syncNativeAudio();
 }
 function setTalkSending(sending) {
   talkBtn.classList.toggle('sending', sending);

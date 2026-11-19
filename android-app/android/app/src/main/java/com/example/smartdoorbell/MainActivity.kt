@@ -47,6 +47,7 @@ class MainActivity : BridgeActivity() {
         super.onCreate(savedInstanceState)
         DoorbellNotifier.ensureChannels(this)
         ApkDownloadSupport.install(this, bridge.webView)
+        DoorbellAudio.install(this, bridge.webView)
         val configured = DoorbellConfig.initialize(this)
         if (!configured) {
             showPairingDialog()
@@ -82,6 +83,7 @@ class MainActivity : BridgeActivity() {
     override fun onStop() {
         mainHandler.removeCallbacks(backgroundMediaStopRunnable)
         if (!DoorbellPip.isActive(this)) {
+            DoorbellAudio.release(this, bridge?.webView)
             mainHandler.postDelayed(backgroundMediaStopRunnable, BACKGROUND_MIC_TIMEOUT_MS)
         }
         super.onStop()
@@ -99,6 +101,7 @@ class MainActivity : BridgeActivity() {
         DoorbellPip.notifyWebView(bridge?.webView, isInPictureInPictureMode)
         // PiP window closed by the user: the activity is already stopped, so start the background rule now.
         if (!isInPictureInPictureMode && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            DoorbellAudio.release(this, bridge?.webView)
             mainHandler.removeCallbacks(backgroundMediaStopRunnable)
             mainHandler.postDelayed(backgroundMediaStopRunnable, BACKGROUND_MIC_TIMEOUT_MS)
         }
@@ -115,6 +118,7 @@ class MainActivity : BridgeActivity() {
     override fun onDestroy() {
         pipReceiver?.let { runCatching { unregisterReceiver(it) } }
         pipReceiver = null
+        DoorbellAudio.release(this, bridge?.webView)
         mainHandler.removeCallbacksAndMessages(null)
         setupDialog?.dismiss()
         setupDialog = null
