@@ -66,7 +66,7 @@ FCM is optional. To enable it, create your own Firebase Android app and add the 
 - Configure public WebRTC candidates/TURN when off-LAN media is required.
 - Use a stable signing key from the first distributed build; Android rejects in-place updates signed by another key.
 - In the call preview (`native_call=1`), camera sound must remain muted until **Atender** is tapped. When the app goes into the background, stop microphone capture and both WebRTC receivers immediately; do not rely on a delayed JavaScript timer.
-- Doorbell audio in the Android app is always hands-free: while the camera sound or the microphone is on, `DoorbellAudio.kt` holds the phone in call mode with the built-in loudspeaker as the only route (never Bluetooth, a wired headset or the earpiece). The page reopens the camera audio when the app enters that mode and when the sound is turned on, so it plays as a call stream covered by the microphone's echo canceller.
+- Doorbell audio in the Android app is always hands-free: while the camera sound or the microphone is on, `DoorbellAudio.kt` holds the phone in call mode with the built-in loudspeaker as the only route (never Bluetooth, a wired headset or the earpiece). Chromium creates received audio as a call stream only while a microphone capture is open, so while the camera sound is on the page holds a silent, disabled microphone capture (sent nowhere): the camera audio stays a call stream with the call volume, covered by the echo canceller, also after the talk microphone is turned off.
 
 ## License
 

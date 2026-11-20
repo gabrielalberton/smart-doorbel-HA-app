@@ -143,13 +143,15 @@ let gateBusy = false;
 let heartbeatTimer = null;
 let statusTimer = null;
 let mediaSuspended = document.hidden;
-// Android app (window.CampainhaAudio): while the camera sound or the microphone is on,
-// the app holds the phone in call mode on the loudspeaker (never Bluetooth, headset or
-// earpiece). Camera audio opened in that mode is a call stream, so it plays on the
-// loudspeaker and the microphone's echo canceller covers it: the visitor does not hear
-// their own voice. The app calls campainhaAudioRouteChanged when it enters or restores
-// the mode; the page reopens the camera audio then and whenever the sound is turned on.
+// Android app (window.CampainhaAudio): the camera sound always plays as a call on the
+// loudspeaker (never Bluetooth, headset or earpiece), covered by the echo canceller so
+// the visitor does not hear their own voice. Chromium creates the received-audio output
+// as a call stream only while a microphone capture is open; otherwise it is media (with
+// the media volume, often low). So while the camera sound is on, the page holds a silent
+// microphone capture (disabled, sent nowhere) and the app keeps the call on the loudspeaker.
 let nativeAudioState = { sound: false, talk: false };
+let callHoldStream = null;
+let callHoldPending = false;
 function syncNativeAudio() {
   const bridge = window.CampainhaAudio;
   if (!bridge) return;
@@ -159,20 +161,27 @@ function syncNativeAudio() {
   if (sound === prev.sound && talk === prev.talk) return;
   nativeAudioState = { sound, talk };
   bridge.setActive(sound || talk);
-  if (sound && !prev.sound) reopenCameraAudio();
+  if (sound !== prev.sound) holdCallStream(sound);
 }
-let reopenCameraAudioTimer = null;
-function reopenCameraAudio() {
-  clearTimeout(reopenCameraAudioTimer);
-  reopenCameraAudioTimer = setTimeout(() => {
-    if (mediaSuspended || video.muted || !video.srcObject) return;
-    const stream = video.srcObject;
-    video.srcObject = null;
-    video.srcObject = stream;
-    video.play().catch(() => {});
-  }, 150);
+async function holdCallStream(on) {
+  if (!on) {
+    callHoldStream?.getTracks().forEach(track => track.stop());
+    callHoldStream = null;
+    return;
+  }
+  if (callHoldStream || callHoldPending) return;
+  callHoldPending = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+    stream.getAudioTracks().forEach(track => { track.enabled = false; });
+    if (nativeAudioState.sound) callHoldStream = stream;
+    else stream.getTracks().forEach(track => track.stop());
+  } catch (e) {
+    console.warn('call audio hold failed', e);
+  } finally {
+    callHoldPending = false;
+  }
 }
-window.campainhaAudioRouteChanged = reopenCameraAudio;
 let mediaGeneration = 0;
 let talkStarting = false;
 let audioEnabled = !nativeCallMode;
