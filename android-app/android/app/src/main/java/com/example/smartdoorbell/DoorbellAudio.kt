@@ -1,12 +1,14 @@
 package com.example.smartdoorbell
 
 import android.app.Activity
+import android.content.Context
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
@@ -29,20 +31,30 @@ import java.util.concurrent.Executor
  * Whenever the mode is entered or has to be restored, the page is told
  * (window.campainhaAudioRouteChanged) to reopen the camera audio in that mode.
  * Chromium, the system or a device change may move the route; the listeners
- * put the loudspeaker back.
+ * put the loudspeaker back, within a budget so a tug-of-war cannot spin.
+ *
+ * Threads: WebView state lives on the main thread; every AudioManager call runs
+ * on a dedicated audio thread, because those binder calls can block for seconds
+ * on some phones and must never freeze the UI (ANR).
  */
 object DoorbellAudio {
     private const val TAG = "DoorbellAudio"
     private const val JS_INTERFACE = "CampainhaAudio"
-    private const val MAX_RESTORES = 4
+    private const val MAX_RESTORES = 6
     private const val RESTORE_WINDOW_MS = 10_000L
 
-    private val handler = Handler(Looper.getMainLooper())
-    private val mainExecutor = Executor { handler.post(it) }
+    private val main = Handler(Looper.getMainLooper())
+    private val audio: Handler by lazy {
+        Handler(HandlerThread("DoorbellAudio").apply { start() }.looper)
+    }
+    private val audioExecutor = Executor { audio.post(it) }
     private val restoreToken = Any()
 
+    // Main thread only.
     /** WebViews whose page currently needs doorbell audio. */
     private val activeWebViews = LinkedHashSet<WebView>()
+
+    // Audio thread only.
     private var audioManager: AudioManager? = null
     private var savedMode = AudioManager.MODE_NORMAL
     private var savedSpeakerphone = false
@@ -50,9 +62,6 @@ object DoorbellAudio {
     private var commDeviceListener: Any? = null
     private var modeListener: Any? = null
     private val restoreTimes = ArrayDeque<Long>()
-
-    private val engaged: Boolean
-        get() = activeWebViews.isNotEmpty()
 
     /** Exposes window.CampainhaAudio to the page in [webView]. */
     fun install(activity: Activity, webView: WebView) {
@@ -67,7 +76,7 @@ object DoorbellAudio {
     private class Bridge(private val activity: Activity, private val webView: WebView) {
         @JavascriptInterface
         fun setActive(active: Boolean) {
-            handler.post {
+            main.post {
                 // Only the doorbell page may take the audio (not a login page, for example).
                 val host = runCatching { Uri.parse(webView.url).host }.getOrNull()
                 if (active && !DoorbellConfig.isDoorbellHost(host)) return@post
@@ -80,30 +89,41 @@ object DoorbellAudio {
         if (active) {
             if (!activeWebViews.add(webView)) return
             activity.volumeControlStream = AudioManager.STREAM_VOICE_CALL
-            if (activeWebViews.size == 1) engage(activity) else notifyRouteChanged(webView)
+            if (activeWebViews.size == 1) {
+                val context = activity.applicationContext
+                audio.post { engage(context) }
+            } else {
+                notifyRouteChanged(webView)
+            }
         } else {
             if (!activeWebViews.remove(webView)) return
             activity.volumeControlStream = AudioManager.USE_DEFAULT_STREAM_TYPE
-            if (!engaged) disengage()
+            if (activeWebViews.isEmpty()) audio.post { disengage() }
         }
     }
 
-    private fun engage(activity: Activity) {
-        val am = activity.getSystemService(AudioManager::class.java) ?: return
+    // ---- Audio thread ----
+
+    private fun engage(context: Context) {
+        if (audioManager != null) return
+        val am = context.getSystemService(AudioManager::class.java) ?: return
+        runCatching {
+            savedMode = am.mode
+            @Suppress("DEPRECATION")
+            savedSpeakerphone = am.isSpeakerphoneOn
+        }
         audioManager = am
-        savedMode = am.mode
-        @Suppress("DEPRECATION")
-        savedSpeakerphone = am.isSpeakerphoneOn
         restoreTimes.clear()
         registerListeners(am)
         applyMode()
         applySpeaker()
         Log.i(TAG, "engaged: mode=${am.mode} route=${routeName()}")
-        activeWebViews.forEach { notifyRouteChanged(it) }
+        main.post { notifyAllRouteChanged() }
     }
 
     private fun disengage() {
         val am = audioManager ?: return
+        audioManager = null
         unregisterListeners(am)
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -114,90 +134,102 @@ object DoorbellAudio {
             }
             am.mode = if (savedMode == AudioManager.MODE_IN_COMMUNICATION) AudioManager.MODE_NORMAL else savedMode
         }.onFailure { Log.w(TAG, "release failed", it) }
-        Log.i(TAG, "released: mode=${am.mode}")
+        Log.i(TAG, "released")
     }
 
     private fun applyMode() {
         val am = audioManager ?: return
-        if (am.mode != AudioManager.MODE_IN_COMMUNICATION) {
-            runCatching { am.mode = AudioManager.MODE_IN_COMMUNICATION }
-                .onFailure { Log.w(TAG, "setMode failed", it) }
-        }
+        runCatching {
+            if (am.mode != AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_IN_COMMUNICATION
+        }.onFailure { Log.w(TAG, "setMode failed", it) }
     }
 
-    /** Loudspeaker as the only route. */
-    private fun applySpeaker() {
-        val am = audioManager ?: return
-        runCatching {
+    /** Loudspeaker as the only route. Returns true when it had to change something. */
+    private fun applySpeaker(): Boolean {
+        val am = audioManager ?: return false
+        return runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (am.communicationDevice?.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
-                    val speaker = am.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                    if (speaker == null || !am.setCommunicationDevice(speaker)) {
-                        Log.w(TAG, "loudspeaker not accepted as communication device")
-                    }
+                if (am.communicationDevice?.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) return@runCatching false
+                val speaker = am.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                if (speaker == null || !am.setCommunicationDevice(speaker)) {
+                    Log.w(TAG, "loudspeaker not accepted as communication device")
                 }
+                true
             } else {
+                var changed = false
                 @Suppress("DEPRECATION")
                 if (am.isBluetoothScoOn) {
                     am.stopBluetoothSco()
                     am.isBluetoothScoOn = false
+                    changed = true
                 }
                 @Suppress("DEPRECATION")
-                if (!am.isSpeakerphoneOn) am.isSpeakerphoneOn = true
+                if (!am.isSpeakerphoneOn) {
+                    am.isSpeakerphoneOn = true
+                    changed = true
+                }
+                changed
             }
-        }.onFailure { Log.w(TAG, "speaker routing failed", it) }
+        }.onFailure { Log.w(TAG, "speaker routing failed", it) }.getOrDefault(false)
     }
 
-    /** Something moved the audio: put it back on the loudspeaker, and in call mode if it was dropped. */
+    /** Something moved the audio: put it back on the loudspeaker, in call mode, within the budget. */
     private fun restore(reason: String) {
-        if (!engaged) return
         val am = audioManager ?: return
-        applySpeaker()
-        if (am.mode == AudioManager.MODE_IN_COMMUNICATION) return
-        // The system can drop the mode (e.g. no audio for a while); do not fight it in a loop.
+        val modeLost = runCatching { am.mode != AudioManager.MODE_IN_COMMUNICATION }.getOrDefault(false)
+        val routeLost = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                am.communicationDevice?.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+            } else {
+                @Suppress("DEPRECATION")
+                !am.isSpeakerphoneOn || am.isBluetoothScoOn
+            }
+        }.getOrDefault(false)
+        if (!modeLost && !routeLost) return
+        // Something keeps taking the audio back (the system, Chromium, a device): do not fight it in a loop.
         val now = SystemClock.elapsedRealtime()
         while (restoreTimes.isNotEmpty() && now - restoreTimes.first() > RESTORE_WINDOW_MS) restoreTimes.removeFirst()
         if (restoreTimes.size >= MAX_RESTORES) {
-            Log.w(TAG, "call mode keeps dropping ($reason); not forcing it again now")
+            Log.w(TAG, "audio keeps moving ($reason); not forcing it again now")
             return
         }
         restoreTimes.addLast(now)
-        applyMode()
+        if (modeLost) applyMode()
         applySpeaker()
         Log.i(TAG, "restored after $reason: mode=${am.mode} route=${routeName()}")
-        activeWebViews.forEach { notifyRouteChanged(it) }
+        if (modeLost) main.post { notifyAllRouteChanged() }
     }
 
+    /** Coalesces bursts of events into one restore. */
     private fun postRestore(reason: String, delayMs: Long) {
-        handler.postAtTime({ restore(reason) }, restoreToken, SystemClock.uptimeMillis() + delayMs)
-    }
-
-    private fun notifyRouteChanged(webView: WebView) {
-        webView.evaluateJavascript("window.campainhaAudioRouteChanged?.();", null)
+        audio.removeCallbacksAndMessages(restoreToken)
+        audio.postAtTime({ restore(reason) }, restoreToken, SystemClock.uptimeMillis() + delayMs)
     }
 
     private fun registerListeners(am: AudioManager) {
         val callback = object : AudioDeviceCallback() {
-            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = postRestore("device added", 300)
-            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = postRestore("device removed", 300)
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) = postRestore("device added", 300)
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) = postRestore("device removed", 300)
         }
-        am.registerAudioDeviceCallback(callback, handler)
-        deviceCallback = callback
+        runCatching {
+            am.registerAudioDeviceCallback(callback, audio)
+            deviceCallback = callback
+        }.onFailure { Log.w(TAG, "device callback failed", it) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) registerApi31Listeners(am)
     }
 
     @RequiresApi(Build.VERSION_CODES.S)
     private fun registerApi31Listeners(am: AudioManager) {
         val deviceListener = AudioManager.OnCommunicationDeviceChangedListener { device ->
-            if (device?.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) postRestore("communication device changed", 0)
+            if (device?.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) postRestore("communication device changed", 100)
         }
         val modeChanged = AudioManager.OnModeChangedListener { mode ->
             if (mode != AudioManager.MODE_IN_COMMUNICATION) postRestore("mode changed to $mode", 200)
         }
         runCatching {
-            am.addOnCommunicationDeviceChangedListener(mainExecutor, deviceListener)
+            am.addOnCommunicationDeviceChangedListener(audioExecutor, deviceListener)
             commDeviceListener = deviceListener
-            am.addOnModeChangedListener(mainExecutor, modeChanged)
+            am.addOnModeChangedListener(audioExecutor, modeChanged)
             modeListener = modeChanged
         }.onFailure { Log.w(TAG, "audio listeners failed", it) }
     }
@@ -215,16 +247,28 @@ object DoorbellAudio {
         }
         commDeviceListener = null
         modeListener = null
-        handler.removeCallbacksAndMessages(restoreToken)
+        audio.removeCallbacksAndMessages(restoreToken)
     }
 
     private fun routeName(): String {
         val am = audioManager ?: return "?"
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            am.communicationDevice?.type?.toString() ?: "none"
-        } else {
-            @Suppress("DEPRECATION")
-            "speakerphone=${am.isSpeakerphoneOn}"
-        }
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                am.communicationDevice?.type?.toString() ?: "none"
+            } else {
+                @Suppress("DEPRECATION")
+                "speakerphone=${am.isSpeakerphoneOn}"
+            }
+        }.getOrDefault("?")
+    }
+
+    // ---- Main thread ----
+
+    private fun notifyAllRouteChanged() {
+        activeWebViews.forEach { notifyRouteChanged(it) }
+    }
+
+    private fun notifyRouteChanged(webView: WebView) {
+        runCatching { webView.evaluateJavascript("window.campainhaAudioRouteChanged?.();", null) }
     }
 }
